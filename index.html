@@ -147,6 +147,87 @@
               text-shadow:0 0 8px rgba(90,215,255,0.75); }
   #depthHud.show { display:block; }
 
+  /* contextual interaction hint */
+  #interactHint {
+    position:absolute;
+    left:50%;
+    bottom:24%;
+    transform:translate(-50%,8px);
+    z-index:14;
+    pointer-events:none;
+    opacity:0;
+    visibility:hidden;
+    padding:7px 12px 8px;
+    border-radius:6px;
+    background:rgba(5,12,19,0.74);
+    color:rgba(238,252,255,0.97);
+    font-family:'GameThai','IBM Plex Sans Thai',sans-serif;
+    font-size:clamp(11px,1.15vw,15px);
+    line-height:1.25;
+    white-space:nowrap;
+    text-align:center;
+    text-shadow:0 1px 3px rgba(0,0,0,0.8);
+    box-shadow:0 0 14px rgba(94,214,240,0.12);
+    transition:opacity 130ms ease, transform 130ms ease, visibility 130ms;
+  }
+  #interactHint.show {
+    opacity:1;
+    visibility:visible;
+    transform:translate(-50%,0);
+  }
+
+  .hintBtnBlue {
+    color:#6fc8ff;
+    font-weight:700;
+  }
+  .hintBtnRed {
+    color:#ff7a7a;
+    font-weight:700;
+  }
+
+  #fpsHint {
+    position:absolute;
+    left:50%;
+    bottom:24%;
+    transform:translate(-50%,8px);
+    z-index:14;
+    pointer-events:none;
+    opacity:0;
+    visibility:hidden;
+    padding:8px 13px 9px;
+    border-radius:6px;
+    background:rgba(5,12,19,0.72);
+    color:rgba(238,252,255,0.97);
+    font-family:'GameThai','IBM Plex Sans Thai',sans-serif;
+    font-size:clamp(11px,1.1vw,14px);
+    line-height:1.35;
+    white-space:nowrap;
+    text-align:center;
+    text-shadow:0 1px 3px rgba(0,0,0,0.8);
+    box-shadow:0 0 14px rgba(94,214,240,0.12);
+    transition:opacity 130ms ease, transform 130ms ease, visibility 130ms;
+  }
+  #fpsHint.show {
+    opacity:1;
+    visibility:visible;
+    transform:translate(-50%,0);
+  }
+
+  @media (max-width:700px){
+    #interactHint {
+      bottom:25%;
+      font-size:11px;
+      padding:6px 9px 7px;
+    }
+    #fpsHint {
+      bottom:25%;
+      font-size:10px;
+      padding:6px 9px 7px;
+      white-space:normal;
+      width:min(72vw, 320px);
+    }
+  }
+
   /* --- on-screen gamepad: chunky pixel / retro --- */
   #controls { position:fixed; left:0; right:0; bottom:0; z-index:15; display:flex;
               align-items:flex-end; justify-content:space-between; pointer-events:none;
@@ -193,6 +274,8 @@
     <div id="choices"></div>
     <div id="reveal"><div class="rv">[ รูปอควาเรียม<br>ใส่ตรงนี้ ]</div></div>
     <div id="depthHud">DEPTH <span id="depthNum">000</span> M</div>
+    <div id="interactHint">กด <span class="hintBtnBlue">X</span> หรือ Space Bar เพื่อโต้ตอบ</div>
+    <div id="fpsHint">ใช้ joystick เพื่อมองไปรอบๆ<br>กด Esc หรือปุ่ม <span class="hintBtnRed">○</span> เพื่อออก</div>
     <div id="crt"></div>
     <div id="gear">⚙</div>
     <div id="settings">
@@ -635,7 +718,7 @@ const things = [
 
   // aquarium lobby
   { x:300, z:5.0, color:"#c9a06f", hiddenMarker:true, pages:["ประตูทางออก","จะกลับออกไปข้างนอกไหม?"], choices:[ {label:"ออก", action:"exit"}, {label:"อยู่ต่อ", reply:["งั้นไปต่อกัน"]} ] },
-  { x:300, z:-2.45, color:"#72dff3", hiddenMarker:true,
+  { x:300, z:-1.45, color:"#72dff3", hiddenMarker:true,
     pages:["ลิฟต์แก้วขนาดใหญ่\nทอดลงไปใต้พื้นอควาเรียม","ข้างล่างมืดจนมองไม่เห็นปลายทาง","ลงไปไหม?"],
     choices:[ {label:"ลงไป", action:"descend"}, {label:"ยัง", reply:["โอเค เดินดูข้างบนก่อนก็ได้"]} ] },
 
@@ -650,10 +733,10 @@ const things = [
     lookX:302.8, lookY:0.92, lookZ:-32.0 },
 
   // side display tanks
-  { x:294.75, z:0.45, color:"#79dce8", hiddenMarker:true, isViewpoint:true, tankNoteSide:-1,
+  { x:295.30, z:0.45, color:"#79dce8", hiddenMarker:true, isViewpoint:true, tankNoteSide:-1,
     fpX:294.45, fpY:1.58, fpZ:0.45,
     lookX:292.74, lookY:1.60, lookZ:0.45 },
-  { x:305.25, z:0.45, color:"#79dce8", hiddenMarker:true, isViewpoint:true, tankNoteSide:1,
+  { x:304.70, z:0.45, color:"#79dce8", hiddenMarker:true, isViewpoint:true, tankNoteSide:1,
     fpX:305.55, fpY:1.58, fpZ:0.45,
     lookX:307.26, lookY:1.60, lookZ:0.45 },
 
@@ -970,10 +1053,11 @@ for(let i=0;i<34;i++){
   const x=-22+Math.random()*44;
   const z=-11.4-Math.random()*24;
   const lane=z;
+  const baseY=-0.22-Math.random()*1.45;
   const spd=0.004+Math.random()*0.006;
   const ph=Math.random()*Math.PI*2;
-  s.position.set(x,0.026,z);
-  seaFish.push({spr:s,x,z,lane,dir,spd,ph,prevX:null,prevY:null,prevZ:null});
+  s.position.set(x,baseY,z);
+  seaFish.push({spr:s,x,z,lane,baseY,dir,spd,ph,prevX:null,prevY:null,prevZ:null});
 }
 
 // --- fireflies ---
@@ -1113,10 +1197,20 @@ function addGlassLift(cx,cz,radius,height){
 // exact exterior night sky and animated sea rather than a separate lobby sky.
 const lobbyFloor=new THREE.Mesh(
   new THREE.PlaneGeometry(15.6,17.8),
-  new THREE.MeshLambertMaterial({color:0x1a2a36})
+  new THREE.MeshPhongMaterial({
+    color:0x17313d,
+    transparent:true,
+    opacity:0.15,
+    shininess:120,
+    specular:0x6fd7e9,
+    depthWrite:false,
+    side:THREE.DoubleSide
+  })
 );
-lobbyFloor.rotation.x=-Math.PI/2; lobbyFloor.position.set(300,0.025,3.65);
-lobbyFloor.receiveShadow=true; scene.add(lobbyFloor);
+lobbyFloor.rotation.x=-Math.PI/2;
+lobbyFloor.position.set(300,0.025,3.65);
+lobbyFloor.renderOrder=4;
+scene.add(lobbyFloor);
 
 // floor grid + glowing path to elevator
 for(let x=293;x<=307;x+=1.4) strip(0.035,10.0,x,0.2,0x315263,0.34);
@@ -1153,12 +1247,180 @@ boxMesh(0.30,4.45,0.24,307.75,2.25,-5.24,metalDark);
 boxMesh(0.44,4.8,18.6,292.15,2.40,3.85,metalDark);
 boxMesh(0.44,4.8,18.6,307.85,2.40,3.85,metalDark);
 
+// FPS-only architectural shell.
+// The dollhouse camera needs an open roof/front, but in first person the player
+// should see an actual ceiling and the wall containing the lobby exit.
+const lobbyFpsShell=new THREE.Group();
+scene.add(lobbyFpsShell);
+lobbyFpsShell.visible=false;
+
+const lobbyCeilingMat=new THREE.MeshLambertMaterial({color:0x263540});
+const lobbyFrontWallMat=new THREE.MeshLambertMaterial({color:0x1d2a34});
+
+const lobbyCeiling=new THREE.Mesh(
+  new THREE.BoxGeometry(15.6,0.20,10.8),
+  lobbyCeilingMat
+);
+lobbyCeiling.position.set(300,4.55,0.18);
+lobbyFpsShell.add(lobbyCeiling);
+
+// Front/exit wall with a centered doorway left open.
+for(const cfg of [
+  [6.20,4.45,0.34,295.90,2.28,5.52],
+  [6.20,4.45,0.34,304.10,2.28,5.52],
+  [3.20,1.02,0.34,300.00,3.94,5.52]
+]){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(cfg[0],cfg[1],cfg[2]),lobbyFrontWallMat);
+  m.position.set(cfg[3],cfg[4],cfg[5]);
+  lobbyFpsShell.add(m);
+}
+
+// Cyan recessed/cove lighting like the reference image.
+const coveMat=new THREE.MeshBasicMaterial({
+  color:0x39dfff,
+  transparent:true,
+  opacity:0.86,
+  blending:THREE.AdditiveBlending,
+  depthWrite:false
+});
+for(const cfg of [
+  [15.0,0.055,0.075,300,4.39,-4.92],
+  [15.0,0.055,0.075,300,4.39,5.18],
+  [0.075,0.055,10.1,292.48,4.39,0.13],
+  [0.075,0.055,10.1,307.52,4.39,0.13]
+]){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(cfg[0],cfg[1],cfg[2]),coveMat);
+  m.position.set(cfg[3],cfg[4],cfg[5]);
+  lobbyFpsShell.add(m);
+}
+
+// Small recessed ceiling lights.
+const downlightMat=new THREE.MeshBasicMaterial({
+  color:0xeafcff,transparent:true,opacity:0.86,
+  blending:THREE.AdditiveBlending,depthWrite:false
+});
+for(const p of [[296.5,1.35],[303.5,1.35],[296.5,-2.25],[303.5,-2.25]]){
+  const d=new THREE.Mesh(new THREE.CylinderGeometry(0.095,0.095,0.025,16),downlightMat);
+  d.rotation.x=Math.PI/2;
+  d.position.set(p[0],4.425,p[1]);
+  lobbyFpsShell.add(d);
+}
+
+// The light itself remains active throughout the lobby so the ceiling glow
+// influences both third-person and first-person views.
+const lobbyCeilingLights=[];
+for(const p of [
+  [294.2,4.15,0.0],[305.8,4.15,0.0],
+  [300.0,4.15,-3.7],[300.0,4.15,4.0]
+]){
+  const l=new THREE.PointLight(0x31cfea,0.36,7.2,2);
+  l.position.set(p[0],p[1],p[2]);
+  l.visible=false;
+  scene.add(l);
+  lobbyCeilingLights.push(l);
+}
+
+// Stronger visible continuation of the elevator tube BELOW the lobby floor.
+const underLobbyLift=new THREE.Group();
+scene.add(underLobbyLift);
+underLobbyLift.position.set(300,0,-3.78);
+underLobbyLift.visible=false;
+
+const SHAFT_BOTTOM_Y=-9.00;
+const SHAFT_TOP_Y=-0.10;
+const SHAFT_HEIGHT=SHAFT_TOP_Y-SHAFT_BOTTOM_Y;
+const SHAFT_CENTER_Y=(SHAFT_TOP_Y+SHAFT_BOTTOM_Y)*0.5;
+
+const shaftGlassMat=new THREE.MeshPhongMaterial({
+  color:0x62ddf3,
+  transparent:true,
+  opacity:0.17,
+  shininess:155,
+  specular:0xd9fbff,
+  side:THREE.DoubleSide,
+  depthWrite:false
+});
+
+const shaftTube=new THREE.Mesh(
+  new THREE.CylinderGeometry(2.05,2.05,SHAFT_HEIGHT,32,1,true),
+  shaftGlassMat
+);
+shaftTube.position.y=SHAFT_CENTER_Y;
+shaftTube.renderOrder=3;
+underLobbyLift.add(shaftTube);
+
+const shaftGlowMat=new THREE.MeshBasicMaterial({
+  color:0x56e9ff,
+  transparent:true,
+  opacity:0.78,
+  blending:THREE.AdditiveBlending,
+  depthWrite:false
+});
+
+// Rings continue all the way down so the shaft depth is readable through glass.
+for(let yy=SHAFT_TOP_Y-0.02; yy>SHAFT_BOTTOM_Y+0.05; yy-=1.18){
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(2.05,0.050,6,32),shaftGlowMat);
+  ring.rotation.x=Math.PI/2;
+  ring.position.y=yy;
+  underLobbyLift.add(ring);
+}
+
+for(const a of [0,Math.PI/2,Math.PI,Math.PI*1.5]){
+  const post=new THREE.Mesh(
+    new THREE.BoxGeometry(0.065,SHAFT_HEIGHT-0.12,0.065),
+    shaftGlowMat
+  );
+  post.position.set(Math.cos(a)*2.05,SHAFT_CENTER_Y,Math.sin(a)*2.05);
+  underLobbyLift.add(post);
+}
+
+const shaftInnerGlow=new THREE.Mesh(
+  new THREE.CylinderGeometry(1.68,1.68,SHAFT_HEIGHT-0.18,24,1,true),
+  new THREE.MeshBasicMaterial({
+    color:0x1cc5e8,
+    transparent:true,
+    opacity:0.030,
+    side:THREE.DoubleSide,
+    depthWrite:false
+  })
+);
+shaftInnerGlow.position.y=SHAFT_CENTER_Y;
+underLobbyLift.add(shaftInnerGlow);
+
+// Sparse shaft lights at several depths, instead of one bright blob at the top.
+for(const yy of [-1.35,-4.40,-7.55]){
+  const l=new THREE.PointLight(0x4de7ff,0.48,5.8,2);
+  l.position.set(0,yy,0);
+  underLobbyLift.add(l);
+}
+
+// Dim bottom platform/ring so the eye can read where the tube finally ends.
+const shaftBottomRing=new THREE.Mesh(
+  new THREE.TorusGeometry(2.05,0.075,8,32),
+  new THREE.MeshBasicMaterial({
+    color:0x46cbe7,
+    transparent:true,
+    opacity:0.48,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false
+  })
+);
+shaftBottomRing.rotation.x=Math.PI/2;
+shaftBottomRing.position.y=SHAFT_BOTTOM_Y+0.04;
+underLobbyLift.add(shaftBottomRing);
+
+// Very subtle blue depth fill below the transparent floor.
+const underLobbyDepthLight=new THREE.PointLight(0x167fa4,0.38,15.0,2);
+underLobbyDepthLight.position.set(300,-5.10,1.2);
+underLobbyDepthLight.visible=false;
+scene.add(underLobbyDepthLight);
+
 // The rear window looks onto the SAME surface environment as outside.
 // Reuse the exact exterior water, seabed and foam materials/uniforms.
 const lobbySeabed=seabed.clone();
 lobbySeabed.material=seabed.material.clone();
 lobbySeabed.material.color.set(0x03111b);
-lobbySeabed.position.set(300,-3.25,-38.0);
+lobbySeabed.position.set(300,-9.15,-38.0);
 lobbySeabed.visible=false;
 scene.add(lobbySeabed);
 
@@ -1353,6 +1615,270 @@ function makeDolphin3D(scale=1){
   return g;
 }
 
+const sharkMat=vistaMat(0x496f79);
+const sharkLightMat=vistaMat(0x7899a0);
+const mantaMat=vistaMat(0x314f63);
+const mantaLightMat=vistaMat(0x6d8792);
+
+function makeShark3D(scale=1){
+  const g=new THREE.Group();
+  g.rotation.order='YXZ';
+
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1,14,9),sharkMat);
+  body.scale.set(1.95,0.43,0.48);
+  g.add(body);
+
+  const snout=new THREE.Mesh(new THREE.ConeGeometry(0.30,0.78,8),sharkLightMat);
+  snout.rotation.z=-Math.PI/2;
+  snout.position.set(2.12,-0.02,0);
+  g.add(snout);
+
+  const dorsal=new THREE.Mesh(new THREE.ConeGeometry(0.34,0.88,3),sharkMat);
+  dorsal.position.set(-0.25,0.56,0);
+  dorsal.rotation.z=-0.08;
+  g.add(dorsal);
+
+  for(const z of [-0.48,0.48]){
+    const fin=new THREE.Mesh(new THREE.ConeGeometry(0.28,0.95,3),sharkMat);
+    fin.rotation.z=-Math.PI/2;
+    fin.rotation.x=z<0?0.72:-0.72;
+    fin.position.set(0.18,-0.06,z);
+    g.add(fin);
+  }
+
+  // Tail gets its own pivot so the whole rear section can sweep side-to-side.
+  const tailRoot=new THREE.Group();
+  tailRoot.position.set(-1.74,0,0);
+  g.add(tailRoot);
+
+  const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.23,0.88,7),sharkMat);
+  stem.rotation.z=Math.PI/2;
+  stem.position.set(-0.38,0,0);
+  tailRoot.add(stem);
+
+  for(const yy of [-0.30,0.30]){
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.36,0.95,3),sharkMat);
+    tail.rotation.z=Math.PI/2;
+    tail.position.set(-0.88,yy,0);
+    tail.rotation.x=yy<0?0.15:-0.15;
+    tailRoot.add(tail);
+  }
+
+  g.userData.tailRoot=tailRoot;
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function mantaWingGeometry(sign){
+  // Flat triangular/diamond wing rooted at the center body.
+  const z=sign;
+  const pos=new Float32Array([
+     0.62, 0.00, 0.05*z,
+    -0.18, 0.00, 1.62*z,
+    -1.02, 0.00, 0.48*z,
+
+     0.62, 0.00, 0.05*z,
+    -1.02, 0.00, 0.48*z,
+    -0.42, 0.00, 0.10*z
+  ]);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function makeManta3D(scale=1){
+  const g=new THREE.Group();
+  g.rotation.order='YXZ';
+
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1,12,8),mantaMat);
+  body.scale.set(0.92,0.075,0.52);
+  g.add(body);
+
+  const wingMat=mantaMat.clone();
+  wingMat.side=THREE.DoubleSide;
+
+  const leftWing=new THREE.Mesh(mantaWingGeometry(-1),wingMat);
+  const rightWing=new THREE.Mesh(mantaWingGeometry(1),wingMat);
+  g.add(leftWing);
+  g.add(rightWing);
+
+  const belly=new THREE.Mesh(new THREE.SphereGeometry(1,10,6),mantaLightMat);
+  belly.scale.set(0.58,0.040,0.38);
+  belly.position.y=-0.07;
+  g.add(belly);
+
+  // Small forward head lobes so +X is visually obvious as the swimming direction.
+  for(const z of [-0.22,0.22]){
+    const lobe=new THREE.Mesh(new THREE.ConeGeometry(0.07,0.40,6),mantaMat);
+    lobe.rotation.z=-Math.PI/2;
+    lobe.position.set(0.92,-0.01,z);
+    g.add(lobe);
+  }
+
+  const tailRoot=new THREE.Group();
+  tailRoot.position.set(-0.78,-0.015,0);
+  g.add(tailRoot);
+
+  const tail=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018,0.035,2.15,6),
+    mantaMat
+  );
+  tail.rotation.z=Math.PI/2;
+  tail.position.set(-1.05,0,0);
+  tailRoot.add(tail);
+
+  g.userData.leftWing=leftWing;
+  g.userData.rightWing=rightWing;
+  g.userData.tailRoot=tailRoot;
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function makeJelly3D(scale=1,color=0x77eaff){
+  const g=new THREE.Group();
+
+  const shellMat=new THREE.MeshPhongMaterial({
+    color,
+    emissive:color,
+    emissiveIntensity:0.82,
+    transparent:true,
+    opacity:0.58,
+    shininess:145,
+    specular:0xe7fbff,
+    side:THREE.DoubleSide,
+    depthWrite:false
+  });
+
+  const glowMat=new THREE.MeshBasicMaterial({
+    color,
+    transparent:true,
+    opacity:0.16,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false,
+    side:THREE.DoubleSide
+  });
+
+  // Rounded dome only — open underneath like a jelly bell.
+  const bell=new THREE.Mesh(
+    new THREE.SphereGeometry(0.52,18,10,0,Math.PI*2,0,Math.PI*0.52),
+    shellMat
+  );
+  bell.scale.set(1.0,0.86,1.0);
+  g.add(bell);
+
+  const rim=new THREE.Mesh(
+    new THREE.TorusGeometry(0.49,0.035,6,24),
+    glowMat.clone()
+  );
+  rim.rotation.x=Math.PI/2;
+  rim.position.y=-0.015;
+  g.add(rim);
+
+  const core=new THREE.Mesh(
+    new THREE.SphereGeometry(0.31,12,8),
+    glowMat.clone()
+  );
+  core.scale.set(1.0,0.72,1.0);
+  core.position.y=-0.01;
+  core.material.opacity=0.23;
+  g.add(core);
+
+  // Slight outer halo gives an obvious underwater glow without a billboard.
+  const halo=new THREE.Mesh(
+    new THREE.SphereGeometry(0.68,12,8),
+    glowMat.clone()
+  );
+  halo.scale.set(1.0,0.72,1.0);
+  halo.position.y=0.02;
+  halo.material.opacity=0.075;
+  g.add(halo);
+
+  const tentacles=[];
+  const tentacleMat=new THREE.MeshBasicMaterial({
+    color,
+    transparent:true,
+    opacity:0.54,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false
+  });
+
+  for(let i=0;i<6;i++){
+    const a=(i/6)*Math.PI*2;
+    const root=new THREE.Group();
+    root.position.set(Math.cos(a)*0.27,-0.15,Math.sin(a)*0.27);
+    g.add(root);
+
+    // two jointed segments so the tentacle can sway rather than rotate as one rod
+    const seg1=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018,0.026,0.48,6),
+      tentacleMat.clone()
+    );
+    seg1.position.y=-0.24;
+    root.add(seg1);
+
+    const joint=new THREE.Group();
+    joint.position.y=-0.47;
+    root.add(joint);
+
+    const seg2=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.010,0.018,0.46,6),
+      tentacleMat.clone()
+    );
+    seg2.position.y=-0.23;
+    joint.add(seg2);
+
+    tentacles.push({root,joint,phase:i*0.95});
+  }
+
+  const light=new THREE.PointLight(color,0.34,3.3,2);
+  light.position.y=0.02;
+  g.add(light);
+
+  g.userData.bell=bell;
+  g.userData.rim=rim;
+  g.userData.core=core;
+  g.userData.halo=halo;
+  g.userData.tentacles=tentacles;
+  g.userData.light=light;
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function animateJelly3D(j,time,phase=0){
+  const pulse=0.5+0.5*Math.sin(time*0.050+phase);
+  const squash=0.90+0.10*pulse;
+
+  if(j.userData.bell){
+    j.userData.bell.scale.set(1.0,0.78+0.10*pulse,1.0);
+  }
+  if(j.userData.core){
+    j.userData.core.scale.set(0.96+0.07*pulse,0.66+0.09*pulse,0.96+0.07*pulse);
+    j.userData.core.material.opacity=0.19+0.10*pulse;
+  }
+  if(j.userData.halo){
+    const hs=0.96+0.08*pulse;
+    j.userData.halo.scale.set(hs,0.69+0.07*pulse,hs);
+    j.userData.halo.material.opacity=0.055+0.045*pulse;
+  }
+  if(j.userData.rim){
+    j.userData.rim.material.opacity=0.14+0.12*pulse;
+  }
+  if(j.userData.light){
+    j.userData.light.intensity=0.25+0.20*pulse;
+  }
+
+  for(const t of (j.userData.tentacles||[])){
+    const wave=time*0.025+phase+t.phase;
+    t.root.rotation.x=Math.sin(wave)*0.10;
+    t.root.rotation.z=Math.cos(wave*0.92)*0.10;
+    t.joint.rotation.x=Math.sin(wave*1.25+0.8)*0.16;
+    t.joint.rotation.z=Math.cos(wave*1.08+0.4)*0.14;
+    const stretch=0.92+0.10*Math.sin(wave*0.76);
+    t.root.scale.y=stretch;
+  }
+}
+
 // Large ship in the middle distance.
 const lobbyShip=addToVista(makeShip3D(0.78));
 lobbyShip.position.set(302.8,0.06,-18.0);
@@ -1371,6 +1897,129 @@ for(const cfg of [
   b.rotation.y=cfg[3];
   lobbyBoat3D.push({g:b,bx:cfg[0],bz:cfg[1],ph:Math.random()*6.28});
 }
+
+// Large 3D shark + manta visible both beyond the rear window
+// and beneath the transparent lobby floor.
+const lobbyLargeFish=[];
+
+function addLobbyLargeFish(kind,underFloor,phase){
+  const g=addToVista(kind==='shark'?makeShark3D(0.58):makeManta3D(0.64));
+  const item={
+    g,kind,underFloor,phase,
+    verticalPhase:Math.random()*Math.PI*2,
+    verticalSpeed:0.00115+Math.random()*0.00125,
+    verticalSpeed2:0.00045+Math.random()*0.00055
+  };
+
+  if(underFloor){
+    item.baseX=300+(Math.random()-0.5)*3.2;
+    item.baseZ=1.0+(Math.random()-0.5)*3.5;
+
+    // Under-lobby animals stay closer to the glass now.
+    // Their deepest excursion is limited to roughly -6.4.
+    item.baseY=kind==='shark'
+      ? -4.15-Math.random()*0.18
+      : -4.00-Math.random()*0.22;
+    item.verticalAmp=kind==='shark'
+      ? 1.45+Math.random()*0.18
+      : 1.58+Math.random()*0.20;
+  }else{
+    item.baseX=300+(Math.random()-0.5)*7.0;
+    item.baseZ=-15.0-Math.random()*8.0;
+
+    // Window-side shark/manta can now use the full deep water column,
+    // down to the old under-lobby limit near -8.7.
+    item.baseY=kind==='shark'
+      ? -4.85-Math.random()*0.35
+      : -4.65-Math.random()*0.40;
+    item.verticalAmp=kind==='shark'
+      ? 2.85+Math.random()*0.35
+      : 3.00+Math.random()*0.40;
+  }
+
+  g.position.set(item.baseX,item.baseY,item.baseZ);
+  lobbyLargeFish.push(item);
+  return item;
+}
+
+addLobbyLargeFish('shark',false,0.4);
+addLobbyLargeFish('manta',false,2.1);
+addLobbyLargeFish('shark',true,3.2);
+addLobbyLargeFish('manta',true,4.8);
+
+// --------------------------------------------------------
+// GLOWING 3D JELLYFISH
+// --------------------------------------------------------
+const jellyColors=[0x75eaff,0x9fa9ff,0xf18bd4];
+
+// Exterior/open-sea jellies near the shoreline water.
+const fieldJellies=[];
+for(let i=0;i<4;i++){
+  const g=makeJelly3D(0.48+Math.random()*0.22,jellyColors[i%jellyColors.length]);
+  g.visible=false;
+  scene.add(g);
+
+  fieldJellies.push({
+    g,
+    x:-8.0+Math.random()*16.0,
+    baseZ:-14.0-Math.random()*14.0,
+    baseY:-0.95-Math.random()*1.25,
+    dir:Math.random()<0.5?-1:1,
+    sideSpeed:0.0020+Math.random()*0.0023,
+    phase:Math.random()*Math.PI*2,
+    driftPhase:Math.random()*Math.PI*2,
+    driftSpeed:0.00055+Math.random()*0.00045,
+    verticalSpeed:0.0013+Math.random()*0.0014,
+    verticalAmp:0.35+Math.random()*0.34
+  });
+}
+
+// Lobby jellies: some framed beyond the panoramic window and some beneath the floor.
+const lobbyJellies=[];
+
+function addLobbyJelly(underFloor,index){
+  const g=addToVista(makeJelly3D(
+    underFloor?0.50+Math.random()*0.18:0.44+Math.random()*0.16,
+    jellyColors[index%jellyColors.length]
+  ));
+
+  const j={
+    g,underFloor,
+    phase:Math.random()*Math.PI*2,
+    orbitPhase:Math.random()*Math.PI*2,
+    orbitSpeed:0.00050+Math.random()*0.00048,
+    verticalPhase:Math.random()*Math.PI*2,
+    verticalSpeed:0.00105+Math.random()*0.00155,
+    verticalSpeed2:0.00038+Math.random()*0.00055
+  };
+
+  if(underFloor){
+    j.x=300+(Math.random()-0.5)*5.2;
+    j.baseZ=0.9+(Math.random()-0.5)*5.2;
+    j.baseY=-4.10-Math.random()*0.22;
+    j.verticalAmp=1.55+Math.random()*0.30;
+    j.sideDir=Math.random()<0.5?-1:1;
+    j.sideSpeed=0.0015+Math.random()*0.0018;
+    j.radiusZ=1.0+Math.random()*1.8;
+  }else{
+    j.x=300+(Math.random()-0.5)*8.0;
+    j.baseZ=-13.0-Math.random()*11.0;
+
+    // Window jellies now roam the whole deep-water column too.
+    j.baseY=-4.65-Math.random()*0.50;
+    j.verticalAmp=3.05+Math.random()*0.45;
+    j.sideDir=Math.random()<0.5?-1:1;
+    j.sideSpeed=0.0014+Math.random()*0.0018;
+    j.radiusZ=0.8+Math.random()*1.8;
+  }
+
+  g.position.set(j.x,j.baseY,j.baseZ);
+  lobbyJellies.push(j);
+  return j;
+}
+
+for(let i=0;i<4;i++) addLobbyJelly(false,i);
+for(let i=0;i<3;i++) addLobbyJelly(true,i+1);
 
 // Large 3D animals are event-driven: they spawn, perform, dive/sink,
 // and fully despawn instead of remaining frozen in the water.
@@ -1519,14 +2168,17 @@ const TINY_FISH_SCHOOLS=5;
 const tinySchools=[];
 for(let s=0;s<TINY_FISH_SCHOOLS;s++){
   const dir=Math.random()<0.5?-1:1;
+  const cz=-10.0-Math.random()*17.0;
+  const cy=-0.80-Math.random()*7.15;
   tinySchools.push({
     cx:293.0+Math.random()*14.0,
-    cz:-10.0-Math.random()*17.0,
-    cy:-0.48-Math.random()*1.35,
+    cz,baseCz:cz,
+    cy,baseCy:cy,
     dir,
     spd:0.0022+Math.random()*0.0024,
     ph:Math.random()*Math.PI*2,
-    sway:0.35+Math.random()*0.30
+    sway:0.35+Math.random()*0.30,
+    depthAmp:0.28+Math.random()*0.55
   });
 }
 
@@ -1569,7 +2221,7 @@ for(let i=0;i<7;i++){
   lobbyTropicalFish.push({
     spr:s,
     x:292.0+Math.random()*16.0,
-    y:-0.52-Math.random()*1.35,
+    y:-0.75-Math.random()*7.45,
     z:-10.0-Math.random()*18.0,
     dir:Math.random()<0.5?-1:1,
     spd:0.0018+Math.random()*0.0030,
@@ -1594,7 +2246,7 @@ for(let i=0;i<5;i++){
   lobbySeahorses.push({
     spr:s,
     x:293.0+Math.random()*14.0,
-    y:-0.70-Math.random()*1.20,
+    y:-1.0-Math.random()*6.70,
     z:-11.0-Math.random()*17.0,
     ph:Math.random()*Math.PI*2
   });
@@ -1612,13 +2264,112 @@ for(let i=0;i<3;i++){
   lobbyRays.push({
     spr:s,
     x:292.0+Math.random()*16.0,
-    y:-1.15-Math.random()*0.95,
+    y:-1.65-Math.random()*6.45,
     z:-13.0-Math.random()*15.0,
     dir:Math.random()<0.5?-1:1,
     spd:0.0014+Math.random()*0.0018,
     ph:Math.random()*Math.PI*2,
     prevX:null,prevY:null,prevZ:null
   });
+}
+
+
+// ------------------------------------------------------------
+// Under-lobby 2D fish schools.
+// These are separate from the panoramic-window schools. They are visible
+// through the transparent floor and circle around the elevator shaft.
+// ------------------------------------------------------------
+const underLobbySchools=[];
+const underLobbyFish=[];
+const UNDER_LOBBY_SCHOOL_COUNT=4;
+
+for(let s=0;s<UNDER_LOBBY_SCHOOL_COUNT;s++){
+  underLobbySchools.push({
+    angle:Math.random()*Math.PI*2,
+    radius:2.75+s*0.72+Math.random()*0.22,
+    radiusZ:2.05+s*0.52+Math.random()*0.20,
+    orbitDir:Math.random()<0.5?-1:1,
+    orbitSpeed:0.00145+Math.random()*0.00105,
+
+    baseY:-2.80-Math.random()*2.55,
+    yAmp:0.38+Math.random()*0.68,
+    yPhase:Math.random()*Math.PI*2,
+    ySpeed:0.0019+Math.random()*0.0018,
+
+    speedMul:1,
+    targetSpeedMul:1,
+    tightness:1,
+    targetTightness:1,
+    behaviorTimer:220+Math.random()*420,
+    behavior:'cruise',
+    bank:0,
+    centerX:300,
+    centerY:-3.7,
+    centerZ:-0.8,
+    vx:0,vz:1,
+    phase:Math.random()*Math.PI*2
+  });
+}
+
+for(let i=0;i<52;i++){
+  const school=underLobbySchools[i%UNDER_LOBBY_SCHOOL_COUNT];
+  const w=0.115+Math.random()*0.105;
+  const spr=fishPlane(tinyFishTex[(i+2)%tinyFishTex.length],w,w*0.60,0.30);
+  spr.material.opacity=0.34+Math.random()*0.20;
+  spr.material.depthWrite=false;
+  spr.renderOrder=1;
+  spr.visible=false;
+
+  // Local school offsets: forward / sideways / height.
+  // More fish near the center, fewer on the edges.
+  const forward=(Math.random()+Math.random()-1)*0.90;
+  const sideways=(Math.random()+Math.random()-1)*0.48;
+  const height=(Math.random()+Math.random()-1)*0.30;
+
+  underLobbyFish.push({
+    spr,school,
+    forward,sideways,height,
+    phase:Math.random()*Math.PI*2,
+    tailBeat:Math.random()*Math.PI*2,
+    baseOpacity:spr.material.opacity,
+    prevX:null,prevY:null,prevZ:null
+  });
+}
+
+function chooseUnderLobbySchoolBehavior(sc){
+  const r=Math.random();
+
+  if(r<0.19){
+    // Sudden coordinated dart: schools tighten before accelerating.
+    sc.behavior='dart';
+    sc.targetSpeedMul=2.15+Math.random()*0.45;
+    sc.targetTightness=0.60+Math.random()*0.10;
+    sc.behaviorTimer=90+Math.random()*80;
+  }else if(r<0.38){
+    // Tight bait-ball style grouping.
+    sc.behavior='tighten';
+    sc.targetSpeedMul=0.80+Math.random()*0.20;
+    sc.targetTightness=0.48+Math.random()*0.12;
+    sc.behaviorTimer=150+Math.random()*190;
+  }else if(r<0.52){
+    // Whole school reverses orbit direction together.
+    sc.behavior='turn';
+    sc.orbitDir*=-1;
+    sc.targetSpeedMul=0.72;
+    sc.targetTightness=0.72;
+    sc.behaviorTimer=110+Math.random()*100;
+  }else if(r<0.70){
+    // Loose feeding/search formation.
+    sc.behavior='spread';
+    sc.targetSpeedMul=0.70+Math.random()*0.18;
+    sc.targetTightness=1.30+Math.random()*0.18;
+    sc.behaviorTimer=190+Math.random()*240;
+  }else{
+    sc.behavior='cruise';
+    sc.targetSpeedMul=0.92+Math.random()*0.24;
+    sc.targetTightness=0.88+Math.random()*0.20;
+    sc.behaviorTimer=250+Math.random()*430;
+  }
 }
 
 // Occasional whale blow / water spring.
@@ -1722,6 +2473,34 @@ fieldRailPad.rotation.x=-Math.PI/2;
 fieldRailPad.position.set(0,0.072,8.0);
 fieldRailPad.visible=false;
 scene.add(fieldRailPad);
+
+const lobbyExitPad=new THREE.Mesh(
+  new THREE.RingGeometry(0.30,0.42,22),
+  new THREE.MeshBasicMaterial({
+    color:0xe7c38a,transparent:true,opacity:0.56,
+    blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide
+  })
+);
+lobbyExitPad.rotation.x=-Math.PI/2;
+lobbyExitPad.position.set(300,0.072,5.0);
+lobbyExitPad.visible=false;
+scene.add(lobbyExitPad);
+
+const lobbyElevatorPad=new THREE.Mesh(
+  new THREE.RingGeometry(0.36,0.53,28),
+  new THREE.MeshBasicMaterial({
+    color:0x72dff3,transparent:true,opacity:0.72,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false,
+    depthTest:false,
+    side:THREE.DoubleSide
+  })
+);
+lobbyElevatorPad.rotation.x=-Math.PI/2;
+lobbyElevatorPad.position.set(300,0.105,-1.45);
+lobbyElevatorPad.renderOrder=20;
+lobbyElevatorPad.visible=false;
+scene.add(lobbyElevatorPad);
 
 // ------------------------------------------------------------
 // SUBTLE SURFACE RAIN
@@ -2252,7 +3031,7 @@ function makeSideTank(side){
     })
   );
   pad.rotation.x=-Math.PI/2;
-  pad.position.set(left?294.75:305.25,0.073,cz);
+  pad.position.set(left?295.30:304.70,0.073,cz);
   pad.visible=false;
   scene.add(pad);
   sideTankPads.push({pad,ph:left?0:2.4});
@@ -2309,6 +3088,10 @@ for(const x of [297.60,302.40]) boxMesh(0.26,4.2,0.34,x,2.1,-4.95,metalMid);
 boxMesh(3.2,0.13,0.10,300,3.85,-1.74,cyanGlow);
 boxMesh(0.10,3.55,0.10,298.42,1.98,-1.74,cyanGlow);
 boxMesh(0.10,3.55,0.10,301.58,1.98,-1.74,cyanGlow);
+
+// Lobby collision so the player doesn't clip through the elevator glass.
+// Interaction happens from the glowing ring in front instead.
+blockers.push({x0:298.15,x1:301.85,z0:-5.55,z1:-2.10});
 
 for(const p of [[296.0,4.0],[304.0,4.0],[296.0,-3.5],[304.0,-3.5]]){
   const pl=new THREE.PointLight(0x4fd8ef,0.55,5.5,2);
@@ -2536,8 +3319,8 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k)>=0) e.preventDefault();
   if(k==='arrowup'||k==='w')held.up=true; if(k==='arrowdown'||k==='s')held.down=true;
   if(k==='arrowleft'||k==='a')held.left=true; if(k==='arrowright'||k==='d')held.right=true;
-  if(k==='z'||k==='enter'||k===' ')aPressed=true; if(k==='shift')sprint=true;
-  if(k==='escape'||k==='backspace'||k==='x')escPressed=true; });
+  if(k==='z'||k==='enter'||k===' '||k==='x')aPressed=true; if(k==='shift')sprint=true;
+  if(k==='escape'||k==='backspace')escPressed=true; });
 addEventListener('keyup',e=>{ const k=e.key.toLowerCase();
   if(k==='arrowup'||k==='w')held.up=false; if(k==='arrowdown'||k==='s')held.down=false;
   if(k==='arrowleft'||k==='a')held.left=false; if(k==='arrowright'||k==='d')held.right=false;
@@ -2555,6 +3338,8 @@ let state='play', dlg=null, anim=0;
 let fpBaseYaw=0, fpBasePitch=0, fpYaw=0, fpPitch=0, fpCamPos=null;
 let activeViewpoint=null;
 const dialogueEl=document.getElementById('dialogue'), dlgTextEl=document.getElementById('dlgtext'), dlgArrowEl=document.getElementById('dlgarrow');
+const interactHintEl=document.getElementById('interactHint');
+const fpsHintEl=document.getElementById('fpsHint');
 const revealEl=document.getElementById('reveal');
 const choicesEl=document.getElementById('choices');
 let curThing=null, curChoices=null, choiceSel=0, choiceCd=0;
@@ -2583,8 +3368,23 @@ function syncDialogue(){ if(state==='dialogue' && dlg){ dialogueEl.classList.rem
     dlgTextEl.textContent = dlg.pages[dlg.page].slice(0, Math.floor(dlg.chars));
     dlgArrowEl.style.visibility=(dlg.done && Math.floor(performance.now()/400)%2===0)?'visible':'hidden';
   } else dialogueEl.classList.add('hidden'); revealEl.classList.toggle('show', state==='reveal'); }
-function tryInteract(){ let best=null, bd=1.5;
-  for(const o of things){ const d=Math.hypot(player.x-o.x, player.z-o.z); if(d<bd){ bd=d; best=o; } }
+function nearestInteractable(maxDist=1.5){
+  let best=null, bd=maxDist;
+  for(const o of things){
+    const d=Math.hypot(player.x-o.x, player.z-o.z);
+    if(d<bd){ bd=d; best=o; }
+  }
+  return best;
+}
+
+function updateInteractHint(){
+  const canInteract=(state==='play' && !!nearestInteractable(1.5));
+  interactHintEl.classList.toggle('show',canInteract);
+  fpsHintEl.classList.toggle('show',state==='fpcam');
+}
+
+function tryInteract(){
+  const best=nearestInteractable(1.5);
   if(best){
     if(best.isViewpoint){
       const cx=(best.fpX!==undefined?best.fpX:player.x);
@@ -2744,6 +3544,102 @@ function update(){ anim++;
       b.g.rotation.z=Math.sin(anim*0.014+b.ph)*0.018;
     }
 
+    // Large shark + manta routes outside the window and under the lobby floor.
+    // Their local +X points toward the head, so the quaternion below maps +X
+    // directly onto the real 3D velocity vector (fixes the old backward swim).
+    for(const f of lobbyLargeFish){
+      const speed=f.underFloor?0.00120:0.00086;
+      const t=anim*speed+f.phase;
+      const span=f.underFloor?3.75:7.10;
+      const depth=f.underFloor?1.45:2.65;
+
+      const x=f.baseX+Math.sin(t)*span;
+      const z=f.baseZ+Math.cos(t*0.73)*depth;
+
+      // Independent vertical cycle per creature. Under-floor animals roam much
+      // farther vertically and are centered deeper in the water.
+      const va=anim*f.verticalSpeed+f.verticalPhase;
+      const vb=anim*f.verticalSpeed2+f.phase*1.71;
+      let y=f.baseY
+        +Math.sin(va)*f.verticalAmp
+        +Math.sin(vb)*f.verticalAmp*0.24;
+
+      if(f.underFloor){
+        y=Math.max(-6.40,Math.min(-2.15,y));
+      }else{
+        y=Math.max(-8.68,Math.min(-0.65,y));
+      }
+
+      const vx=Math.cos(t)*span*speed;
+      const vz=-Math.sin(t*0.73)*depth*0.73*speed;
+      const vy=Math.cos(va)*f.verticalAmp*f.verticalSpeed
+        +Math.cos(vb)*f.verticalAmp*0.24*f.verticalSpeed2;
+
+      f.g.position.set(x,y,z);
+
+      const dir3=new THREE.Vector3(vx,vy,vz);
+      if(dir3.lengthSq()>1e-10){
+        dir3.normalize();
+        f.g.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),dir3);
+      }
+
+      // Natural banking through turns.
+      const bank=Math.sin(t*0.73)*0.10;
+      f.g.rotateX(bank);
+
+      if(f.kind==='shark'){
+        // Tail beat gets stronger than the body roll.
+        if(f.g.userData.tailRoot){
+          f.g.userData.tailRoot.rotation.y=Math.sin(anim*0.075+f.phase*4.0)*0.24;
+        }
+        // small whole-body serpentine sway
+        f.g.rotateY(Math.sin(anim*0.037+f.phase)*0.018);
+      }else{
+        // Real wing flap: opposite rotations make both wing tips rise/fall together.
+        const flap=Math.sin(anim*0.038+f.phase*2.2)*0.18;
+        if(f.g.userData.leftWing)  f.g.userData.leftWing.rotation.x= flap;
+        if(f.g.userData.rightWing) f.g.userData.rightWing.rotation.x=-flap;
+        if(f.g.userData.tailRoot)  f.g.userData.tailRoot.rotation.y=Math.sin(anim*0.020+f.phase)*0.055;
+      }
+    }
+
+    // Glowing 3D lobby jellyfish.
+    // They now actually travel sideways while independently rising/falling.
+    for(const j of lobbyJellies){
+      j.x += j.sideDir*j.sideSpeed;
+
+      const minX=j.underFloor?296.3:291.8;
+      const maxX=j.underFloor?303.7:308.2;
+      if(j.x<minX){ j.x=minX; j.sideDir=1; }
+      if(j.x>maxX){ j.x=maxX; j.sideDir=-1; }
+
+      const ot=anim*j.orbitSpeed+j.orbitPhase;
+      const va=anim*j.verticalSpeed+j.verticalPhase;
+      const vb=anim*j.verticalSpeed2+j.phase*1.37;
+
+      const x=j.x + Math.sin(ot*1.7)*0.22;
+      const z=j.baseZ+Math.cos(ot*0.83)*j.radiusZ;
+      let y=j.baseY
+        +Math.sin(va)*j.verticalAmp
+        +Math.sin(vb)*j.verticalAmp*0.24;
+
+      if(j.underFloor){
+        // Under-floor jellies remain visible through the glass.
+        y=Math.max(-6.45,Math.min(-2.10,y));
+      }else{
+        // Window-side jellies can descend to the old under-lobby maximum.
+        y=Math.max(-8.70,Math.min(-0.60,y));
+      }
+
+      j.g.position.set(x,y,z);
+
+      // Slight lean into its sideways drift; bell itself still pulses vertically.
+      j.g.rotation.y=j.sideDir>0?0:Math.PI;
+      j.g.rotation.z=Math.sin(anim*0.003+j.phase)*0.035
+        -j.sideDir*0.035;
+      animateJelly3D(j.g,anim,j.phase);
+    }
+
     // --------------------------------------------------------
     // WHALE: rise from depth -> surface + spout -> sink to floor -> despawn
     // --------------------------------------------------------
@@ -2887,10 +3783,14 @@ function update(){ anim++;
       if(lobbyDolphinCooldown<=0) startLobbyDolphinEvent();
     }
 
-    // Compact fish schools: the group moves and turns together.
+    // Compact fish schools move as small 3D clouds rather than flat horizontal lines.
     for(const sc of tinySchools){
       sc.cx += sc.dir*sc.spd;
-      sc.cz += Math.sin(anim*0.0018+sc.ph)*0.0014;
+      sc.cz = sc.baseCz + Math.sin(anim*0.0024+sc.ph)*0.72;
+      sc.cy = Math.max(
+        -8.50,
+        Math.min(-0.38, sc.baseCy + Math.sin(anim*0.0031+sc.ph*1.4)*sc.depthAmp)
+      );
 
       if(sc.cx<292.0){ sc.cx=292.0; sc.dir=1; }
       if(sc.cx>308.0){ sc.cx=308.0; sc.dir=-1; }
@@ -2900,47 +3800,172 @@ function update(){ anim++;
       const sc=f.school;
       const pulse=Math.sin(anim*0.018+f.ph);
       const x=sc.cx + f.ox*sc.dir + pulse*0.035;
-      const y=sc.cy + f.oy + Math.sin(anim*0.012+f.ph)*0.045;
-      const z=sc.cz + f.oz + Math.sin(anim*0.005+sc.ph)*sc.sway*0.22;
+      const y=Math.max(
+        -8.68,
+        Math.min(-0.30, sc.cy + f.oy + Math.sin(anim*0.012+f.ph)*0.075)
+      );
+      const z=sc.cz + f.oz + Math.sin(anim*0.005+f.ph)*sc.sway*0.30;
 
+      const oldZ=f.prevZ;
       f.spr.position.set(x,y,z);
       orientFishPlane(f,x,y,z,sc.dir,0);
+
+      // tiny bank while changing depth to keep the particles from looking paper-flat
+      const dz=(oldZ===null||oldZ===undefined)?0:(z-oldZ);
+      f.spr.rotation.x=Math.max(-0.16,Math.min(0.16,dz*9.0));
       f.spr.material.opacity=f.baseOpacity*(0.90+0.10*(0.5+0.5*pulse));
     }
 
-    // Sparse tropical fish travel independently between the schools.
+    // Sparse tropical fish arc gently in Y/Z as they cross the vista.
     for(const f of lobbyTropicalFish){
       f.x+=f.dir*f.spd;
       if(f.x<291.4){ f.x=291.4; f.dir=1; }
       if(f.x>308.6){ f.x=308.6; f.dir=-1; }
 
-      const ty=f.y+Math.sin(anim*0.010+f.ph)*0.06;
-      const tz=f.z+Math.sin(anim*0.0035+f.ph)*0.32;
+      const ty=Math.max(-8.68,Math.min(-0.35,f.y+Math.sin(anim*0.009+f.ph)*0.34));
+      const tz=f.z+Math.sin(anim*0.0034+f.ph)*0.56;
+      const oldZ=f.prevZ;
       f.spr.position.set(f.x,ty,tz);
       orientFishPlane(f,f.x,ty,tz,f.dir,0);
+      const dz=(oldZ===null||oldZ===undefined)?0:(tz-oldZ);
+      f.spr.rotation.x=Math.max(-0.18,Math.min(0.18,dz*7.5));
     }
 
     // Seahorses mostly hover with a slow vertical bob and tiny side drift.
     for(const s of lobbySeahorses){
       s.spr.position.set(
         s.x+Math.sin(anim*0.0025+s.ph)*0.18,
-        s.y+Math.sin(anim*0.007+s.ph)*0.10,
+        Math.max(-8.68,Math.min(-0.45,s.y+Math.sin(anim*0.007+s.ph)*0.22)),
         s.z+Math.cos(anim*0.002+s.ph)*0.14
       );
       s.spr.rotation.z=Math.sin(anim*0.004+s.ph)*0.07;
     }
 
-    // Rays glide slowly through deeper water.
+    // Ray particles glide on a 3D path and gently flap instead of sliding flat.
     for(const r of lobbyRays){
       r.x+=r.dir*r.spd;
       if(r.x<291.6){ r.x=291.6; r.dir=1; }
       if(r.x>308.4){ r.x=308.4; r.dir=-1; }
 
-      const ry=r.y+Math.sin(anim*0.006+r.ph)*0.08;
-      const rz=r.z+Math.sin(anim*0.0028+r.ph)*0.44;
+      const ry=Math.max(-8.68,Math.min(-0.65,r.y+Math.sin(anim*0.0052+r.ph)*0.42));
+      const rz=r.z+Math.sin(anim*0.0026+r.ph)*0.66;
+      const oldZ=r.prevZ;
       r.spr.position.set(r.x,ry,rz);
       orientFishPlane(r,r.x,ry,rz,r.dir,0);
-      r.spr.rotation.z+=Math.sin(anim*0.008+r.ph)*0.010;
+
+      const flap=0.90+0.10*(0.5+0.5*Math.sin(anim*0.040+r.ph));
+      r.spr.scale.y=flap;
+      const dz=(oldZ===null||oldZ===undefined)?0:(rz-oldZ);
+      r.spr.rotation.x=Math.max(-0.20,Math.min(0.20,dz*7.0));
+      r.spr.rotation.z+=Math.sin(anim*0.010+r.ph)*0.008;
+    }
+
+
+    // --------------------------------------------------------
+    // Under-lobby fish schools.
+    // --------------------------------------------------------
+    for(const sc of underLobbySchools){
+      sc.behaviorTimer--;
+      if(sc.behaviorTimer<=0) chooseUnderLobbySchoolBehavior(sc);
+
+      // Behaviors blend rather than snapping.
+      sc.speedMul += (sc.targetSpeedMul-sc.speedMul)*0.018;
+      sc.tightness += (sc.targetTightness-sc.tightness)*0.018;
+
+      // After a short burst/turn, naturally relax back toward cruising.
+      if(sc.behaviorTimer<45 && sc.behavior!=='cruise'){
+        sc.targetSpeedMul=1.0;
+        sc.targetTightness=1.0;
+      }
+
+      const da=sc.orbitDir*sc.orbitSpeed*sc.speedMul;
+      sc.angle+=da;
+
+      // The shaft is centered at x=300,z=-3.78.
+      // Elliptical orbits keep the school outside the 2.05-radius glass tube.
+      const wobble=Math.sin(anim*0.0015+sc.phase)*0.18;
+      const radius=sc.radius+wobble;
+      const radiusZ=sc.radiusZ+Math.cos(anim*0.0013+sc.phase)*0.14;
+
+      sc.centerX=300+Math.cos(sc.angle)*radius;
+      sc.centerZ=-3.78+Math.sin(sc.angle)*radiusZ;
+
+      sc.centerY=Math.max(
+        -6.18,
+        Math.min(
+          -1.55,
+          sc.baseY
+            +Math.sin(anim*sc.ySpeed+sc.yPhase)*sc.yAmp
+            +Math.sin(anim*0.00062+sc.phase)*0.28
+        )
+      );
+
+      // Tangent vector = school heading.
+      let tx=-Math.sin(sc.angle)*radius*sc.orbitDir;
+      let tz= Math.cos(sc.angle)*radiusZ*sc.orbitDir;
+      const tl=Math.max(0.0001,Math.hypot(tx,tz));
+      tx/=tl; tz/=tl;
+
+      sc.vx=tx;
+      sc.vz=tz;
+
+      // Lean/bank into coordinated turns.
+      const targetBank=Math.sin(sc.angle)*0.12*sc.orbitDir;
+      sc.bank+=(targetBank-sc.bank)*0.045;
+    }
+
+    for(const f of underLobbyFish){
+      const sc=f.school;
+
+      // local tangent and side-normal directions
+      const tx=sc.vx, tz=sc.vz;
+      const nx=-tz, nz=tx;
+
+      // Formation "breathing": school gently expands/contracts in addition to
+      // behavioral tightening/spreading.
+      const breathe=1.0+0.075*Math.sin(anim*0.006+f.phase+sc.phase);
+      const formation=sc.tightness*breathe;
+
+      // Small independent micro-swims while preserving the group.
+      const microForward=Math.sin(anim*0.016+f.phase)*0.050;
+      const microSide=Math.sin(anim*0.011+f.phase*1.7)*0.040;
+      const microY=Math.sin(anim*0.013+f.phase)*0.060;
+
+      const forward=(f.forward*formation)+microForward;
+      const side=(f.sideways*formation)+microSide;
+
+      let x=sc.centerX + tx*forward + nx*side;
+      let z=sc.centerZ + tz*forward + nz*side;
+      let y=sc.centerY + f.height*formation + microY;
+
+      // Individual fish never descend beyond the new under-lobby limit.
+      y=Math.max(-6.30,Math.min(-1.35,y));
+
+      // Extra hard shaft avoidance. If a fish gets too close to the glass tube,
+      // nudge it radially outward rather than letting it clip through.
+      let dx=x-300, dz=z+3.78;
+      let dist=Math.hypot(dx,dz);
+      if(dist<2.30){
+        const push=(2.30-dist);
+        dx/=Math.max(0.001,dist);
+        dz/=Math.max(0.001,dist);
+        x+=dx*push;
+        z+=dz*push;
+      }
+
+      f.spr.position.set(x,y,z);
+      orientFishPlane(f,x,y,z,tx,tz);
+
+      // Natural bank and pitch through turns / depth changes.
+      f.spr.rotation.x+=sc.bank;
+      f.spr.rotation.z+=Math.sin(anim*0.025+f.tailBeat)*0.018;
+
+      // A school flashes slightly brighter during a fast dart.
+      const dartBoost=Math.min(1,Math.max(0,(sc.speedMul-1.0)/1.5));
+      f.spr.material.opacity=Math.min(
+        0.72,
+        f.baseOpacity*(0.92+0.08*Math.sin(anim*0.018+f.phase))+dartBoost*0.08
+      );
     }
 
     for(const g of lobbyGlints){
@@ -3164,14 +4189,38 @@ function update(){ anim++;
   }
 
   // underwater fish drift in loose schools beneath the surface
+  for(const j of fieldJellies){
+    j.x += j.dir*j.sideSpeed;
+    if(j.x<-11.0){ j.x=-11.0; j.dir=1; }
+    if(j.x>11.0){ j.x=11.0; j.dir=-1; }
+
+    const ot=anim*j.driftSpeed+j.driftPhase;
+    const va=anim*j.verticalSpeed+j.phase;
+
+    const x=j.x+Math.sin(ot*1.5)*0.28;
+    const z=j.baseZ+Math.cos(ot*0.78)*1.8;
+    const y=j.baseY+Math.sin(va)*j.verticalAmp;
+
+    j.g.position.set(x,y,z);
+    j.g.rotation.y=j.dir>0?0:Math.PI;
+    j.g.rotation.z=Math.sin(anim*0.0035+j.phase)*0.025-j.dir*0.028;
+    animateJelly3D(j.g,anim,j.phase);
+  }
+
   for(const f of seaFish){
     f.x += f.dir*f.spd;
     if(f.x < -23){ f.x=-23; f.dir=1; }
     if(f.x > 23){ f.x=23; f.dir=-1; }
-    const zz=f.lane + Math.sin(anim*0.006+f.ph)*0.65;
-    const yy=0.024 + Math.sin(anim*0.020+f.ph)*0.006;
+
+    const zz=f.lane + Math.sin(anim*0.0048+f.ph)*0.82;
+    const yy=f.baseY + Math.sin(anim*0.0072+f.ph*1.3)*0.19;
+    const oldZ=f.prevZ;
+
     f.spr.position.set(f.x,yy,zz);
     orientFishPlane(f,f.x,yy,zz,f.dir,0);
+
+    const dz=(oldZ===null||oldZ===undefined)?0:(zz-oldZ);
+    f.spr.rotation.x=Math.max(-0.16,Math.min(0.16,dz*5.5));
     f.spr.material.opacity=0.28+0.10*(0.5+0.5*Math.sin(anim*0.014+f.ph));
   }
 
@@ -3240,6 +4289,13 @@ function update(){ anim++;
   milkyGroup.visible=surfaceEnv;
 
   for(const l of lobbyWaterLights) l.visible=lobbyEnv;
+  for(const l of lobbyCeilingLights) l.visible=lobbyEnv;
+
+  // Ceiling/front exit wall are only rendered in first person so they do not
+  // block the normal dollhouse camera.
+  lobbyFpsShell.visible=lobbyEnv && state==='fpcam';
+  underLobbyLift.visible=lobbyEnv;
+  underLobbyDepthLight.visible=lobbyEnv;
 
   if(!surfaceEnv){
     fieldRain.lines.visible=false;
@@ -3251,8 +4307,11 @@ function update(){ anim++;
   lobbyWater.visible=lobbyEnv;
   lobbyFoam.visible=lobbyEnv;
   const fieldPlay=(zone==='field' && state==='play');
+  for(const j of fieldJellies) j.g.visible=(zone==='field');
   fieldEntryPad.visible=fieldPlay;
   fieldRailPad.visible=fieldPlay;
+  lobbyExitPad.visible=lobbyEnv && state==='play';
+  lobbyElevatorPad.visible=lobbyEnv && state==='play'; // circular elevator interaction marker
   lobbyViewPad.visible=lobbyEnv && state==='play';
   lobbyRightViewPad.visible=lobbyEnv && state==='play';
   for(const f of sideTankFish) f.spr.visible=lobbyEnv;
@@ -3265,6 +4324,8 @@ function update(){ anim++;
 
   for(const r of lobbySeaRipples) r.m.visible=lobbyEnv;
   for(const o of lobbyVistaObjects) o.visible=lobbyEnv;
+  for(const f of lobbyLargeFish) f.g.visible=lobbyEnv;
+  for(const j of lobbyJellies) j.g.visible=lobbyEnv;
 
   // Event animals manage their own visibility.
   lobbyWhale.visible=lobbyEnv && whaleEventActive;
@@ -3276,6 +4337,7 @@ function update(){ anim++;
   for(const f of lobbyTropicalFish) f.spr.visible=lobbyEnv;
   for(const s of lobbySeahorses) s.spr.visible=lobbyEnv;
   for(const r of lobbyRays) r.spr.visible=lobbyEnv;
+  for(const f of underLobbyFish) f.spr.visible=lobbyEnv;
   if(!lobbyEnv){
     whaleSpout.visible=false;
     lobbyWhale.visible=false;
@@ -3293,6 +4355,13 @@ function update(){ anim++;
   }
 
   if(lobbyEnv){
+    lobbyExitPad.material.opacity=0.34+0.22*(0.5+0.5*Math.sin(anim*0.043+0.25));
+    lobbyElevatorPad.material.opacity=0.58+0.24*(0.5+0.5*Math.sin(anim*0.045+0.7));
+    const exs=1.0+0.08*Math.sin(anim*0.034+0.25);
+    const els=1.0+0.10*Math.sin(anim*0.034+0.7);
+    lobbyExitPad.scale.set(exs,exs,exs);
+    lobbyElevatorPad.scale.set(els,els,els);
+
     lobbyViewPad.material.opacity=0.38+0.24*(0.5+0.5*Math.sin(anim*0.045));
     lobbyRightViewPad.material.opacity=0.38+0.24*(0.5+0.5*Math.sin(anim*0.045+1.1));
     const ps=1.0+0.08*Math.sin(anim*0.035);
@@ -3332,6 +4401,7 @@ try{ window.focus(); }catch(e){}
 addEventListener('load', ()=>{ try{ window.focus(); }catch(e){} });
 function frame(){ update(); renderer.render(scene, camera);
   if(bloomOn){ bctx.clearRect(0,0,RW,RH); bctx.drawImage(GAME,0,0,RW,RH); }
+  updateInteractHint();
   syncDialogue(); requestAnimationFrame(frame); }
 document.fonts.load('13px GameThai').catch(()=>{}).finally(()=> requestAnimationFrame(frame));
 
