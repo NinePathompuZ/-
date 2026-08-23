@@ -1416,13 +1416,9 @@ underLobbyDepthLight.visible=false;
 scene.add(underLobbyDepthLight);
 
 // The rear window looks onto the SAME surface environment as outside.
-// Reuse the exact exterior water, seabed and foam materials/uniforms.
-const lobbySeabed=seabed.clone();
-lobbySeabed.material=seabed.material.clone();
-lobbySeabed.material.color.set(0x03111b);
-lobbySeabed.position.set(300,-9.15,-38.0);
-lobbySeabed.visible=false;
-scene.add(lobbySeabed);
+// There is intentionally NO rectangular lobby seabed plane here.
+// The old giant plane had a visible straight near edge through the water.
+const lobbySeabed=null;
 
 const lobbyWater=water.clone();
 // Same exterior water shader and animation, but a little more transparent at this
@@ -2289,7 +2285,7 @@ for(let s=0;s<UNDER_LOBBY_SCHOOL_COUNT;s++){
     radius:2.75+s*0.72+Math.random()*0.22,
     radiusZ:2.05+s*0.52+Math.random()*0.20,
     orbitDir:Math.random()<0.5?-1:1,
-    orbitSpeed:0.00145+Math.random()*0.00105,
+    orbitSpeed:0.00175+Math.random()*0.00110,
 
     baseY:-2.80-Math.random()*2.55,
     yAmp:0.38+Math.random()*0.68,
@@ -2352,11 +2348,10 @@ function chooseUnderLobbySchoolBehavior(sc){
     sc.targetTightness=0.48+Math.random()*0.12;
     sc.behaviorTimer=150+Math.random()*190;
   }else if(r<0.52){
-    // Whole school reverses orbit direction together.
-    sc.behavior='turn';
-    sc.orbitDir*=-1;
-    sc.targetSpeedMul=0.72;
-    sc.targetTightness=0.72;
+    // Smooth coordinated bend while continuing around the same circular route.
+    sc.behavior='curve';
+    sc.targetSpeedMul=0.78+Math.random()*0.12;
+    sc.targetTightness=0.72+Math.random()*0.08;
     sc.behaviorTimer=110+Math.random()*100;
   }else if(r<0.70){
     // Loose feeding/search formation.
@@ -2624,13 +2619,22 @@ for(let i=0;i<13;i++){
 // Right: cool pelagic tank (jellyfish + silver fish + rays)
 // ------------------------------------------------------------
 const sideTankGlassMat=new THREE.MeshPhongMaterial({
-  color:0x8de8f3,transparent:true,opacity:0.105,
-  shininess:125,specular:0xd8fbff,
-  side:THREE.DoubleSide,depthWrite:false
+  color:0x8de8f3,
+  transparent:true,
+  opacity:0.105,
+  shininess:125,
+  specular:0xd8fbff,
+  side:THREE.DoubleSide,
+  depthWrite:false,
+  depthTest:true
 });
 const sideTankWaterMat=new THREE.MeshBasicMaterial({
-  color:0x0b5e75,transparent:true,opacity:0.36,
-  side:THREE.DoubleSide,depthWrite:false
+  color:0x0b5e75,
+  transparent:true,
+  opacity:0.30,
+  side:THREE.BackSide,
+  depthWrite:false,
+  depthTest:true
 });
 const sideTankBackLeft=new THREE.MeshBasicMaterial({color:0x073645});
 const sideTankBackRight=new THREE.MeshBasicMaterial({color:0x082d45});
@@ -2790,24 +2794,34 @@ function makeSideTank(side){
   );
   back.position.set(innerX,1.78,cz);
   back.rotation.y=left?Math.PI/2:-Math.PI/2;
+  back.renderOrder=1;
   scene.add(back);
 
   // Water volume gives depth between wall and glass.
+  // IMPORTANT: leave a real gap from BOTH the back panel and front glass.
+  // The old box ended exactly on those planes and caused z-fighting/flicker
+  // whenever the camera rotated.
+  const waterGap=0.055;
+  const waterDepth=Math.max(0.12,Math.abs(frontX-innerX)-waterGap*2);
   const waterBox=new THREE.Mesh(
-    new THREE.BoxGeometry(Math.abs(frontX-innerX),height,length),
+    new THREE.BoxGeometry(waterDepth,height-0.06,length-0.08),
     sideTankWaterMat.clone()
   );
   waterBox.position.set(centerX,1.78,cz);
+  waterBox.renderOrder=2;
   scene.add(waterBox);
 
   // One clear viewing pane on the room-facing side.
+  // Offset it a hair toward the room so it can never become coplanar with
+  // the water volume, even at grazing camera angles.
+  const glassOffset=left?0.018:-0.018;
   const glass=new THREE.Mesh(
     new THREE.PlaneGeometry(length,height),
     sideTankGlassMat.clone()
   );
-  glass.position.set(frontX,1.78,cz);
+  glass.position.set(frontX+glassOffset,1.78,cz);
   glass.rotation.y=left?Math.PI/2:-Math.PI/2;
-  glass.renderOrder=5;
+  glass.renderOrder=8;
   scene.add(glass);
 
   // Simple metal perimeter.
@@ -3039,6 +3053,28 @@ function makeSideTank(side){
 
 makeSideTank(-1);
 makeSideTank(1);
+
+// Stable transparency ordering for the display tanks:
+// backing -> water -> fish/decor/bubbles -> front glass.
+for(const f of sideTankFish){
+  f.spr.renderOrder=4;
+  if(f.spr.material){
+    f.spr.material.depthWrite=false;
+    f.spr.material.depthTest=true;
+  }
+}
+for(const d of sideTankDecor){
+  d.renderOrder=4;
+  if(d.material && d.material.transparent){
+    d.material.depthWrite=false;
+    d.material.depthTest=true;
+  }
+}
+for(const b of sideTankBubbles){
+  b.spr.renderOrder=5;
+  b.spr.material.depthWrite=false;
+  b.spr.material.depthTest=true;
+}
 
 function getTankSystem(side){
   return sideTankSystems.find(t=>t.side===side);
@@ -3633,10 +3669,19 @@ function update(){ anim++;
 
       j.g.position.set(x,y,z);
 
-      // Slight lean into its sideways drift; bell itself still pulses vertically.
+      // Jellyfish tilt into the direction they are actually drifting.
+      // X drift gives the main sideways lean; Z drift adds a smaller front/back lean.
+      const vx=j.sideDir*j.sideSpeed
+        +Math.cos(ot*1.7)*0.22*1.7*j.orbitSpeed;
+      const vz=-Math.sin(ot*0.83)*j.radiusZ*0.83*j.orbitSpeed;
+      const hs=Math.max(0.00001,Math.hypot(vx,vz));
+
+      const leanX=(vz/hs)*0.11;
+      const leanZ=-(vx/hs)*0.18;
+
       j.g.rotation.y=j.sideDir>0?0:Math.PI;
-      j.g.rotation.z=Math.sin(anim*0.003+j.phase)*0.035
-        -j.sideDir*0.035;
+      j.g.rotation.x=leanX+Math.sin(anim*0.0024+j.phase)*0.018;
+      j.g.rotation.z=leanZ+Math.sin(anim*0.003+j.phase)*0.025;
       animateJelly3D(j.g,anim,j.phase);
     }
 
@@ -3909,9 +3954,8 @@ function update(){ anim++;
       sc.vx=tx;
       sc.vz=tz;
 
-      // Lean/bank into coordinated turns.
-      const targetBank=Math.sin(sc.angle)*0.12*sc.orbitDir;
-      sc.bank+=(targetBank-sc.bank)*0.045;
+      // The school itself circles the shaft. Individual fish should NOT
+      // roll around their own body axis; their heading simply follows the tangent.
     }
 
     for(const f of underLobbyFish){
@@ -3954,11 +3998,14 @@ function update(){ anim++;
       }
 
       f.spr.position.set(x,y,z);
+
+      // Follow the tangent of the circular school route.
+      // This is the "spinning around" behavior: the whole school circles
+      // the elevator shaft. The fish themselves do not drill/roll.
       orientFishPlane(f,x,y,z,tx,tz);
 
-      // Natural bank and pitch through turns / depth changes.
-      f.spr.rotation.x+=sc.bank;
-      f.spr.rotation.z+=Math.sin(anim*0.025+f.tailBeat)*0.018;
+      // Tiny heading wiggle / tail-beat impression without rolling the body.
+      f.spr.rotation.y += Math.sin(anim*0.020+f.tailBeat)*0.012;
 
       // A school flashes slightly brighter during a fast dart.
       const dartBoost=Math.min(1,Math.max(0,(sc.speedMul-1.0)/1.5));
@@ -4202,8 +4249,15 @@ function update(){ anim++;
     const y=j.baseY+Math.sin(va)*j.verticalAmp;
 
     j.g.position.set(x,y,z);
+
+    const vx=j.dir*j.sideSpeed
+      +Math.cos(ot*1.5)*0.28*1.5*j.driftSpeed;
+    const vz=-Math.sin(ot*0.78)*1.8*0.78*j.driftSpeed;
+    const hs=Math.max(0.00001,Math.hypot(vx,vz));
+
     j.g.rotation.y=j.dir>0?0:Math.PI;
-    j.g.rotation.z=Math.sin(anim*0.0035+j.phase)*0.025-j.dir*0.028;
+    j.g.rotation.x=(vz/hs)*0.10+Math.sin(anim*0.0025+j.phase)*0.016;
+    j.g.rotation.z=-(vx/hs)*0.17+Math.sin(anim*0.0035+j.phase)*0.022;
     animateJelly3D(j.g,anim,j.phase);
   }
 
@@ -4303,7 +4357,7 @@ function update(){ anim++;
     for(const d of lobbyGlassDrops) d.m.visible=false;
   }
 
-  lobbySeabed.visible=lobbyEnv;
+  // No lobby seabed plane: keep the water column visually open.
   lobbyWater.visible=lobbyEnv;
   lobbyFoam.visible=lobbyEnv;
   const fieldPlay=(zone==='field' && state==='play');
