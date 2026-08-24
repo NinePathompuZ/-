@@ -308,6 +308,7 @@
 const GAME = document.getElementById('game');
 let RW = 384, RH = 240;   // recomputed in fit() to match the viewport
 const renderer = new THREE.WebGLRenderer({ canvas:GAME, antialias:false, preserveDrawingBuffer:true });
+renderer.localClippingEnabled=true;
 renderer.setPixelRatio(1); renderer.setSize(RW, RH, false); renderer.setClearColor(0x030711, 1);
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 const scene  = new THREE.Scene();
@@ -411,6 +412,52 @@ const brightStars=new THREE.Points(brightGeo, new THREE.PointsMaterial({
   transparent:true, opacity:0.98, fog:false, depthWrite:false
 }));
 scene.add(brightStars);
+
+// In the lobby, sky particles must never bleed beneath the water surface.
+// This plane removes celestial fragments below the surface while preserving
+// the moon/stars above the horizon.
+const lobbySkyClipPlane=new THREE.Plane(new THREE.Vector3(0,-1,0),0.10);
+let lobbySkyClipActive=false;
+
+function collectCelestialMaterials(){
+  const mats=new Set();
+  const addObj=(obj)=>{
+    if(!obj) return;
+    obj.traverse?.(child=>{
+      if(child.material){
+        if(Array.isArray(child.material)){
+          for(const m of child.material) if(m) mats.add(m);
+        }else mats.add(child.material);
+      }
+    });
+    if(obj.material){
+      if(Array.isArray(obj.material)){
+        for(const m of obj.material) if(m) mats.add(m);
+      }else mats.add(obj.material);
+    }
+  };
+
+  addObj(stars);
+  addObj(brightStars);
+  addObj(constGroup);
+  addObj(milkyGroup);
+  return [...mats];
+}
+
+let celestialClipMaterials=null;
+function setLobbySkyClipping(enabled){
+  if(lobbySkyClipActive===enabled) return;
+  lobbySkyClipActive=enabled;
+
+  if(!celestialClipMaterials) celestialClipMaterials=collectCelestialMaterials();
+
+  for(const m of celestialClipMaterials){
+    m.clippingPlanes=enabled?[lobbySkyClipPlane]:null;
+    m.clipIntersection=false;
+    m.needsUpdate=true;
+  }
+}
+
 // moon
 function moonTexGen(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
   const g=x.createRadialGradient(32,32,4,32,32,30); g.addColorStop(0,'rgba(242,247,255,1)'); g.addColorStop(0.55,'rgba(212,226,250,0.96)'); g.addColorStop(0.72,'rgba(160,186,236,0.4)'); g.addColorStop(1,'rgba(150,180,235,0)');
@@ -513,6 +560,54 @@ for(let i=0;i<24;i++){
   const s=new THREE.Sprite(new THREE.SpriteMaterial({map:mwDust,transparent:true,depthWrite:false,blending:THREE.NormalBlending,opacity:0.16+0.12*core,fog:false}));
   s.scale.set(50+Math.random()*42+core*24,18+Math.random()*22+core*10,1); s.position.set(p[0],p[1],p[2]); milkyGroup.add(s);
 }
+
+
+// Preserve the original Milky Way above the horizon, while physically
+// removing its below-horizon part so it cannot show through lobby water.
+(function trimMilkyBelowHorizon(){
+  const LOCAL_HORIZON_Y=13.5;
+
+  for(const child of milkyGroup.children){
+    if(child.isPoints && child.geometry){
+      const pos=child.geometry.getAttribute('position');
+      if(!pos) continue;
+      const col=child.geometry.getAttribute('color');
+
+      const nextPos=[];
+      const nextCol=[];
+
+      for(let i=0;i<pos.count;i++){
+        const y=pos.getY(i);
+        if(y < LOCAL_HORIZON_Y) continue;
+
+        nextPos.push(pos.getX(i), y, pos.getZ(i));
+
+        if(col){
+          nextCol.push(col.getX(i), col.getY(i), col.getZ(i));
+        }
+      }
+
+      child.geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(nextPos,3)
+      );
+
+      if(col){
+        child.geometry.setAttribute(
+          'color',
+          new THREE.Float32BufferAttribute(nextCol,3)
+        );
+      }
+
+      child.geometry.computeBoundingSphere();
+    }
+    else if(child.isSprite){
+      if(child.position.y < LOCAL_HORIZON_Y){
+        child.visible=false;
+      }
+    }
+  }
+})();
 
 // --- recognizable constellations ---
 const constGroup=new THREE.Group(); scene.add(constGroup);
@@ -1015,6 +1110,115 @@ const PACK_RIPPLES=[
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAmCAYAAAB6QSGzAAABy0lEQVR42u2cTUoEMRCFKwtBEEFQl57GtXeaO7n2NLN0BEGEARe60oXMTzpdqVRVvrecTU8636t+laRbBCGEEEIIIYQQCq6ScVCPm+fvUdd+2TwVsAJ8F2Bf3N+oXfvr9R1zAP54yFuhvr69EhGRy4e7v9/22518vH12NQTQA36XuKJZ3bUqP7AD/vDcvtQYa6INwAN+mubVszBacvAjG0QjitFPAH5og1jFLgwwMfgzxCMAdwC+V9BaoobG2v1I0GvmYjbTlFGAt2bdFgi1ljjXGsASrkPz8nsfTo1jFgOUnqCfA+7/JtJ+uxMRqd5EagWx1ggZ1uqp9o3ga0YWyypPno7bM1nc2+Jx4DSWOcA+Vuh6FbIlc1AiVQIrADXGEMkIa8ZrdURkTRo4NBclSgXxBlI0c/Ss4B5hP3d/WfdN8qQboR5GsDobBfhBALc86jBDbwX4jit372gR1QgaEZEjC4Gqq5eNuAyNfwH42DHi1H/nNUkqvmrl197R9RCvOKuDCVyBY20KzuqgFLFNM4JlMgXgB3ziaK/2zPheMeAHi1g1J16XfDKlBfoMlR/wk/QbNU8B3tUF/Gmb8BkbWYQQQgghhBBCKKV+AMUEAixke7coAAAAAElFTkSuQmCC'
 ];
 const seaRipples=[];
+
+// ------------------------------------------------------------
+// Bioluminescent algae
+// Soft irregular glow patches rather than point particles.
+// ------------------------------------------------------------
+function algaeTexGen(){
+  const c=document.createElement('canvas');
+  c.width=c.height=96;
+  const x=c.getContext('2d');
+  x.clearRect(0,0,96,96);
+  x.globalCompositeOperation='lighter';
+
+  const blobs=[
+    [47,47,30,0.58],
+    [29,50,17,0.34],
+    [64,39,18,0.31],
+    [55,65,14,0.24],
+    [36,31,13,0.21]
+  ];
+
+  for(const [cx,cy,r,a] of blobs){
+    const g=x.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0,`rgba(126,255,180,${a})`);
+    g.addColorStop(0.30,`rgba(70,241,176,${a*0.72})`);
+    g.addColorStop(0.66,`rgba(31,200,166,${a*0.28})`);
+    g.addColorStop(1,'rgba(18,135,140,0)');
+    x.fillStyle=g;
+    x.beginPath();
+    x.arc(cx,cy,r,0,Math.PI*2);
+    x.fill();
+  }
+
+  x.globalCompositeOperation='source-over';
+  x.strokeStyle='rgba(154,255,195,0.18)';
+  x.lineWidth=2;
+  x.beginPath();
+  x.moveTo(22,54);
+  x.quadraticCurveTo(46,39,74,48);
+  x.moveTo(31,68);
+  x.quadraticCurveTo(47,53,61,25);
+  x.stroke();
+
+  const t=new THREE.CanvasTexture(c);
+  t.magFilter=THREE.LinearFilter;
+  t.minFilter=THREE.LinearFilter;
+  return t;
+}
+
+const algaeTex=algaeTexGen();
+
+function makeAlgaePatch(x,y,z,w,h,opacity,phase,underwater=false){
+  const mat=new THREE.MeshBasicMaterial({
+    map:algaeTex,
+    color:underwater?0x70eeb3:0x8effbd,
+    transparent:true,
+    opacity,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false,
+    depthTest:true,
+    side:THREE.DoubleSide
+  });
+
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);
+  m.position.set(x,y,z);
+  m.rotation.x=-Math.PI/2+(underwater?(Math.random()-0.5)*0.18:0);
+  m.rotation.z=Math.random()*Math.PI*2;
+  m.renderOrder=underwater?1:4;
+  m.visible=false;
+  scene.add(m);
+
+  return {
+    m,
+    baseX:x,baseY:y,baseZ:z,
+    baseOpacity:opacity,
+    phase,
+    underwater,
+    pulseSpeed:0.006+Math.random()*0.005
+  };
+}
+
+const fieldAlgae=[];
+const lobbyAlgae=[];
+
+// Exterior sea.
+for(let i=0;i<11;i++){
+  fieldAlgae.push(makeAlgaePatch(
+    -15+Math.random()*30,
+    0.066,
+    -12-Math.random()*27,
+    0.85+Math.random()*1.75,
+    0.46+Math.random()*1.00,
+    0.050+Math.random()*0.065,
+    Math.random()*Math.PI*2,
+    false
+  ));
+}
+for(let i=0;i<8;i++){
+  fieldAlgae.push(makeAlgaePatch(
+    -15+Math.random()*30,
+    -0.35-Math.random()*1.65,
+    -13-Math.random()*26,
+    0.70+Math.random()*1.40,
+    0.42+Math.random()*0.88,
+    0.040+Math.random()*0.052,
+    Math.random()*Math.PI*2,
+    true
+  ));
+}
+
 function addSeaRipple(uri,x,z,w,h,op,phase){
   const tx=pix(uri);
   tx.magFilter=THREE.LinearFilter;
@@ -1334,7 +1538,7 @@ const SHAFT_CENTER_Y=(SHAFT_TOP_Y+SHAFT_BOTTOM_Y)*0.5;
 const shaftGlassMat=new THREE.MeshPhongMaterial({
   color:0x62ddf3,
   transparent:true,
-  opacity:0.17,
+  opacity:0.11,
   shininess:155,
   specular:0xd9fbff,
   side:THREE.DoubleSide,
@@ -1350,9 +1554,9 @@ shaftTube.renderOrder=3;
 underLobbyLift.add(shaftTube);
 
 const shaftGlowMat=new THREE.MeshBasicMaterial({
-  color:0x56e9ff,
+  color:0x49cfe3,
   transparent:true,
-  opacity:0.78,
+  opacity:0.34,
   blending:THREE.AdditiveBlending,
   depthWrite:false
 });
@@ -1377,9 +1581,9 @@ for(const a of [0,Math.PI/2,Math.PI,Math.PI*1.5]){
 const shaftInnerGlow=new THREE.Mesh(
   new THREE.CylinderGeometry(1.68,1.68,SHAFT_HEIGHT-0.18,24,1,true),
   new THREE.MeshBasicMaterial({
-    color:0x1cc5e8,
+    color:0x19aecd,
     transparent:true,
-    opacity:0.030,
+    opacity:0.012,
     side:THREE.DoubleSide,
     depthWrite:false
   })
@@ -1389,7 +1593,7 @@ underLobbyLift.add(shaftInnerGlow);
 
 // Sparse shaft lights at several depths, instead of one bright blob at the top.
 for(const yy of [-1.35,-4.40,-7.55]){
-  const l=new THREE.PointLight(0x4de7ff,0.48,5.8,2);
+  const l=new THREE.PointLight(0x4de7ff,0.22,4.9,2);
   l.position.set(0,yy,0);
   underLobbyLift.add(l);
 }
@@ -1398,9 +1602,9 @@ for(const yy of [-1.35,-4.40,-7.55]){
 const shaftBottomRing=new THREE.Mesh(
   new THREE.TorusGeometry(2.05,0.075,8,32),
   new THREE.MeshBasicMaterial({
-    color:0x46cbe7,
+    color:0x3ab2cf,
     transparent:true,
-    opacity:0.48,
+    opacity:0.22,
     blending:THREE.AdditiveBlending,
     depthWrite:false
   })
@@ -1410,7 +1614,7 @@ shaftBottomRing.position.y=SHAFT_BOTTOM_Y+0.04;
 underLobbyLift.add(shaftBottomRing);
 
 // Very subtle blue depth fill below the transparent floor.
-const underLobbyDepthLight=new THREE.PointLight(0x167fa4,0.38,15.0,2);
+const underLobbyDepthLight=new THREE.PointLight(0x167fa4,0.16,12.0,2);
 underLobbyDepthLight.position.set(300,-5.10,1.2);
 underLobbyDepthLight.visible=false;
 scene.add(underLobbyDepthLight);
@@ -1463,6 +1667,48 @@ for(const [srcIdx,x,z,sc,op] of [
   lobbySeaRipples.push({m:r,baseX:x,baseZ:z,op,phase:Math.random()*Math.PI*2});
 }
 
+// Lobby ocean surface blooms.
+for(let i=0;i<9;i++){
+  lobbyAlgae.push(makeAlgaePatch(
+    292.5+Math.random()*15.0,
+    0.067,
+    -9.0-Math.random()*22.0,
+    0.80+Math.random()*1.50,
+    0.44+Math.random()*0.90,
+    0.048+Math.random()*0.060,
+    Math.random()*Math.PI*2,
+    false
+  ));
+}
+
+// Deeper suspended algae clouds outside the panoramic glass.
+for(let i=0;i<7;i++){
+  lobbyAlgae.push(makeAlgaePatch(
+    292.5+Math.random()*15.0,
+    -0.55-Math.random()*4.10,
+    -9.5-Math.random()*22.5,
+    0.72+Math.random()*1.28,
+    0.42+Math.random()*0.78,
+    0.038+Math.random()*0.050,
+    Math.random()*Math.PI*2,
+    true
+  ));
+}
+
+// A few dim blooms beneath the transparent lobby floor.
+for(let i=0;i<5;i++){
+  lobbyAlgae.push(makeAlgaePatch(
+    294.0+Math.random()*12.0,
+    -1.7-Math.random()*3.6,
+    -0.7+Math.random()*5.5,
+    0.70+Math.random()*1.20,
+    0.40+Math.random()*0.68,
+    0.035+Math.random()*0.044,
+    Math.random()*Math.PI*2,
+    true
+  ));
+}
+
 // ------------------------------------------------------------------
 // Large low-poly surface vessels and sea life. These are real 3D
 // objects, not tiny billboard details, because this window is now
@@ -1487,6 +1733,60 @@ const dolphinMat=vistaMat(0x4c8294);
 const warmLamp=new THREE.MeshBasicMaterial({color:0xffdf85});
 
 function addToVista(g){ g.visible=false; scene.add(g); lobbyVistaObjects.push(g); return g; }
+
+function prepareEventFade(g){
+  const mats=[];
+
+  g.traverse(o=>{
+    if(!o.material) return;
+
+    const prepareOne=(m)=>{
+      const c=m.clone();
+      c.userData._eventBaseOpacity=(m.opacity===undefined?1:m.opacity);
+      c.userData._eventBaseTransparent=!!m.transparent;
+      c.userData._eventBaseDepthWrite=(m.depthWrite!==false);
+      mats.push(c);
+      return c;
+    };
+
+    if(Array.isArray(o.material)){
+      o.material=o.material.map(prepareOne);
+    }else{
+      o.material=prepareOne(o.material);
+    }
+  });
+
+  g.userData.eventFadeMaterials=mats;
+  return g;
+}
+
+function setEventFade(g,alpha){
+  alpha=Math.max(0,Math.min(1,alpha));
+
+  for(const m of (g.userData.eventFadeMaterials||[])){
+    const baseOpacity=m.userData._eventBaseOpacity ?? 1;
+    const baseTransparent=m.userData._eventBaseTransparent ?? false;
+    const baseDepthWrite=m.userData._eventBaseDepthWrite ?? true;
+
+    m.opacity=baseOpacity*alpha;
+
+    if(alpha<0.995){
+      m.transparent=true;
+      m.depthWrite=false;
+    }else{
+      m.transparent=baseTransparent;
+      m.depthWrite=baseDepthWrite;
+      m.opacity=baseOpacity;
+    }
+
+    m.needsUpdate=true;
+  }
+}
+
+function smoothEvent01(v){
+  v=Math.max(0,Math.min(1,v));
+  return v*v*(3-2*v);
+}
 
 function makeBoat3D(scale=1){
   const g=new THREE.Group();
@@ -2021,26 +2321,29 @@ for(let i=0;i<3;i++) addLobbyJelly(true,i+1);
 // and fully despawn instead of remaining frozen in the water.
 
 // WHALE EVENT
-const lobbyWhale=addToVista(makeWhale3D(0.72));
+const lobbyWhale=prepareEventFade(addToVista(makeWhale3D(0.94)));
+setEventFade(lobbyWhale,0);
 lobbyWhale.visible=false;
 
 let whaleEventCooldown=1500+Math.random()*2200;
 let whaleEventActive=false;
 let whaleEventT=0;
-let whaleEventRise=180;
+let whaleEventRise=310;
 let whaleEventHold=300;
-let whaleEventSink=220;
+let whaleEventSink=340;
 let whaleEventX=300;
 let whaleEventZ=-18;
 let whaleEventYaw=0;
-let whaleEventSurfaceY=-0.20;
+let whaleEventSurfaceY=-0.08;
 let whaleEventFloorY=-3.30;
 let whaleSpoutTriggered=false;
+let whaleSurfaceSplashTriggered=false;
 
 function startWhaleEvent(){
   whaleEventActive=true;
   whaleEventT=0;
   whaleSpoutTriggered=false;
+  whaleSurfaceSplashTriggered=false;
 
   // Random location well offshore, but still framed by the lobby window.
   whaleEventX=293.0+Math.random()*14.0;
@@ -2049,27 +2352,34 @@ function startWhaleEvent(){
   // Completely random heading/orientation.
   whaleEventYaw=Math.random()*Math.PI*2;
 
-  whaleEventRise=165+Math.floor(Math.random()*55);
-  whaleEventHold=280+Math.floor(Math.random()*100);
-  whaleEventSink=200+Math.floor(Math.random()*70);
+  // Slow, calm vertical travel.
+  whaleEventRise=285+Math.floor(Math.random()*85);
+  whaleEventHold=300+Math.floor(Math.random()*110);
+  whaleEventSink=315+Math.floor(Math.random()*95);
 
   lobbyWhale.position.set(whaleEventX,whaleEventFloorY,whaleEventZ);
   lobbyWhale.rotation.set(0,whaleEventYaw,0);
+
+  // Spawn fully faded at depth; the rise animation reveals it gradually.
+  setEventFade(lobbyWhale,0);
   lobbyWhale.visible=true;
 }
 
 // DOLPHIN EVENTS
 const lobbyDolphins=[
-  addToVista(makeDolphin3D(0.68)),
-  addToVista(makeDolphin3D(0.56))
+  prepareEventFade(addToVista(makeDolphin3D(0.68))),
+  prepareEventFade(addToVista(makeDolphin3D(0.56)))
 ];
-for(const d of lobbyDolphins) d.visible=false;
+for(const d of lobbyDolphins){
+  setEventFade(d,0);
+  d.visible=false;
+}
 
 let lobbyDolphinCooldown=1800+Math.random()*3000;
 let lobbyDolphinActive=false;
 let lobbyDolphinT=0;
 let lobbyDolphinWhich=0;
-let lobbyDolphinDuration=150;
+let lobbyDolphinDuration=225;
 let lobbyDolphinStartX=300;
 let lobbyDolphinStartZ=-19;
 let lobbyDolphinYaw=0;
@@ -2077,12 +2387,18 @@ let lobbyDolphinTravel=7;
 let lobbyDolphinFloorY=-3.25;
 let lobbyDolphinStartY=-1.35;
 let lobbyDolphinPeakY=0.85;
+let lobbyDolphinDiveSplashTriggered=false;
+let lobbyDolphinWasAboveWater=false;
 
 function startLobbyDolphinEvent(){
   lobbyDolphinActive=true;
   lobbyDolphinT=0;
+  lobbyDolphinDiveSplashTriggered=false;
+  lobbyDolphinWasAboveWater=false;
   lobbyDolphinWhich=Math.random()<0.72?0:1;
-  lobbyDolphinDuration=135+Math.floor(Math.random()*55);
+
+  // Slower breach + descent makes the appearance much less abrupt.
+  lobbyDolphinDuration=205+Math.floor(Math.random()*75);
 
   // Random offshore spawn point.
   lobbyDolphinStartX=293.0+Math.random()*14.0;
@@ -2101,6 +2417,9 @@ function startLobbyDolphinEvent(){
     if(i===lobbyDolphinWhich){
       d.position.set(lobbyDolphinStartX,lobbyDolphinStartY,lobbyDolphinStartZ);
       d.rotation.set(0,lobbyDolphinYaw,0);
+      setEventFade(d,0);
+    }else{
+      setEventFade(d,0);
     }
   }
 }
@@ -2160,7 +2479,7 @@ const tinyFishTex=tinyFishPalette.map(c=>fishTexGen(c));
 
 // Fewer, tighter schools. Each school turns as one body instead of individual
 // fish reversing independently.
-const TINY_FISH_SCHOOLS=5;
+const TINY_FISH_SCHOOLS=6;
 const tinySchools=[];
 for(let s=0;s<TINY_FISH_SCHOOLS;s++){
   const dir=Math.random()<0.5?-1:1;
@@ -2178,9 +2497,9 @@ for(let s=0;s<TINY_FISH_SCHOOLS;s++){
   });
 }
 
-for(let i=0;i<45;i++){
+for(let i=0;i<66;i++){
   const school=tinySchools[i%TINY_FISH_SCHOOLS];
-  const w=0.13+Math.random()*0.13;
+  const w=0.16+Math.random()*0.14;
   const spr=fishPlane(tinyFishTex[i%tinyFishTex.length],w,w*0.60,0.32);
   spr.material.opacity=0.42+Math.random()*0.20;
   spr.material.depthWrite=false;
@@ -2277,7 +2596,7 @@ for(let i=0;i<3;i++){
 // ------------------------------------------------------------
 const underLobbySchools=[];
 const underLobbyFish=[];
-const UNDER_LOBBY_SCHOOL_COUNT=4;
+const UNDER_LOBBY_SCHOOL_COUNT=5;
 
 for(let s=0;s<UNDER_LOBBY_SCHOOL_COUNT;s++){
   underLobbySchools.push({
@@ -2307,9 +2626,9 @@ for(let s=0;s<UNDER_LOBBY_SCHOOL_COUNT;s++){
   });
 }
 
-for(let i=0;i<52;i++){
+for(let i=0;i<82;i++){
   const school=underLobbySchools[i%UNDER_LOBBY_SCHOOL_COUNT];
-  const w=0.115+Math.random()*0.105;
+  const w=0.145+Math.random()*0.12;
   const spr=fishPlane(tinyFishTex[(i+2)%tinyFishTex.length],w,w*0.60,0.30);
   spr.material.opacity=0.34+Math.random()*0.20;
   spr.material.depthWrite=false;
@@ -2368,7 +2687,7 @@ function chooseUnderLobbySchoolBehavior(sc){
 }
 
 // Occasional whale blow / water spring.
-const WHALE_SPOUT_N=34;
+const WHALE_SPOUT_N=54;
 const whaleSpoutPos=new Float32Array(WHALE_SPOUT_N*3);
 const whaleSpoutMeta=[];
 for(let i=0;i<WHALE_SPOUT_N;i++){
@@ -2377,8 +2696,8 @@ for(let i=0;i<WHALE_SPOUT_N;i++){
   whaleSpoutPos[i*3+2]=-18.0;
   whaleSpoutMeta.push({
     ang:Math.random()*Math.PI*2,
-    spread:0.20+Math.random()*0.55,
-    speed:0.55+Math.random()*0.65,
+    spread:0.26+Math.random()*0.78,
+    speed:0.72+Math.random()*0.82,
     lag:Math.random()*0.32
   });
 }
@@ -2388,7 +2707,7 @@ const whaleSpout=new THREE.Points(
   whaleSpoutGeo,
   new THREE.PointsMaterial({
     color:0xc6f4ff,
-    size:0.085,
+    size:0.108,
     transparent:true,
     opacity:0.78,
     sizeAttenuation:true,
@@ -2400,11 +2719,11 @@ scene.add(whaleSpout);
 
 let whaleSpoutActive=false;
 let whaleSpoutT=0;
-const WHALE_SPOUT_FRAMES=165;
+const WHALE_SPOUT_FRAMES=190;
 
 // Sparse surface glints remain as a small atmospheric layer.
 const lobbyGlints=[];
-for(let i=0;i<22;i++){
+for(let i=0;i<0;i++){
   const g=new THREE.Mesh(
     new THREE.PlaneGeometry(0.08+Math.random()*0.16,0.014),
     new THREE.MeshBasicMaterial({
@@ -2418,6 +2737,103 @@ for(let i=0;i<22;i++){
   scene.add(g);
   lobbyGlints.push({m:g,phase:Math.random()*Math.PI*2,base:g.material.opacity});
 }
+
+// Soft moon shafts framed by the lobby window so the moonlight reads inside the room.
+// Lobby-only stars. Unlike the global camera-centered celestial sphere,
+ // every one of these points is physically placed well ABOVE the waterline,
+ // so none can ever bleed into the underwater view.
+ const LOBBY_SKY_STAR_N=95;
+ const lobbySkyStarPos=new Float32Array(LOBBY_SKY_STAR_N*3);
+ const lobbySkyStarCol=new Float32Array(LOBBY_SKY_STAR_N*3);
+ for(let i=0;i<LOBBY_SKY_STAR_N;i++){
+   // Spread behind and above the panoramic window.
+   lobbySkyStarPos[i*3]   = 270 + Math.random()*60;
+   lobbySkyStarPos[i*3+1] = 7.0 + Math.random()*34.0;
+   lobbySkyStarPos[i*3+2] = -42.0 - Math.random()*105.0;
+
+   const r=Math.random();
+   let c;
+   if(r<0.72) c=new THREE.Color(0xf5fbff);
+   else if(r<0.84) c=new THREE.Color(0xcbe8ff);
+   else if(r<0.94) c=new THREE.Color(0xfff1bd);
+   else c=new THREE.Color(0xffc49a);
+
+   lobbySkyStarCol[i*3]=c.r;
+   lobbySkyStarCol[i*3+1]=c.g;
+   lobbySkyStarCol[i*3+2]=c.b;
+ }
+ const lobbySkyStarGeo=new THREE.BufferGeometry();
+ lobbySkyStarGeo.setAttribute('position',new THREE.BufferAttribute(lobbySkyStarPos,3));
+ lobbySkyStarGeo.setAttribute('color',new THREE.BufferAttribute(lobbySkyStarCol,3));
+ const lobbySkyStars=new THREE.Points(
+   lobbySkyStarGeo,
+   new THREE.PointsMaterial({
+     vertexColors:true,
+     size:1.45,
+     sizeAttenuation:false,
+     transparent:true,
+     opacity:0.78,
+     fog:false,
+     depthWrite:false
+   })
+ );
+ lobbySkyStars.visible=false;
+ scene.add(lobbySkyStars);
+
+const lobbyMoonShafts=[];
+
+function lobbyMoonBeam(bx,bz,width,len,dx,opacity){
+  const base=new THREE.Vector3(bx,0.18,bz);
+  const up=new THREE.Vector3(dx,2.35,-13).normalize();
+
+  let right=new THREE.Vector3().crossVectors(
+    up,
+    new THREE.Vector3(0,0,1)
+  );
+
+  if(right.lengthSq()<1e-4) right.set(1,0,0);
+  right.normalize();
+
+  const normal=new THREE.Vector3()
+    .crossVectors(right,up)
+    .normalize();
+
+  // Reuse the exterior feathered beam texture so the shaft has soft edges
+  // instead of appearing as a rectangular translucent panel.
+  const mat=makeBeamMat(opacity);
+  mat.depthTest=true;
+
+  const m=new THREE.Mesh(
+    new THREE.PlaneGeometry(width,len),
+    mat
+  );
+
+  m.quaternion.setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(right,up,normal)
+  );
+
+  // Starts just above the waterline and travels upward toward the moon.
+  m.position.copy(base).add(
+    up.clone().multiplyScalar(len*0.5)
+  );
+
+  m.renderOrder=1;
+  m.visible=false;
+  scene.add(m);
+
+  lobbyMoonShafts.push({
+    m,
+    baseOpacity:opacity,
+    phase:Math.random()*Math.PI*2
+  });
+}
+
+// Nested soft beams, matching the exterior style.
+lobbyMoonBeam(300.0,-6.0,10.0,108, 0.00,0.040);
+lobbyMoonBeam(297.9,-5.7, 4.6,102,-0.07,0.060);
+lobbyMoonBeam(302.1,-5.7, 4.6,102, 0.07,0.060);
+lobbyMoonBeam(300.0,-5.5, 2.9, 96, 0.00,0.075);
+
 
 // Glowing floor ring makes the first-person window interaction discoverable.
 const lobbyViewPad=new THREE.Mesh(
@@ -2552,6 +2968,104 @@ function makeSplashPool(count,color){
 const fieldGroundSplashes=makeSplashPool(10,0xb6dce6);
 const fieldWaterSplashes=makeSplashPool(13,0xb7f0f4);
 const lobbyWaterSplashes=makeSplashPool(12,0xb7f0f4);
+
+// Dedicated event splashes so dolphin/whale impacts are independent of rain.
+const dolphinEventSplashes=makeSplashPool(8,0xc9f7ff);
+const whaleEventSplashes=makeSplashPool(14,0xd8fbff);
+
+function makeEventSpray(count,color,size){
+  const pos=new Float32Array(count*3);
+  const vel=[];
+  for(let i=0;i<count;i++){
+    pos[i*3]=0; pos[i*3+1]=-99; pos[i*3+2]=0;
+    vel.push({x:0,y:0,z:0});
+  }
+
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+
+  const pts=new THREE.Points(
+    geo,
+    new THREE.PointsMaterial({
+      color,
+      size,
+      transparent:true,
+      opacity:0,
+      sizeAttenuation:true,
+      depthWrite:false
+    })
+  );
+  pts.visible=false;
+  scene.add(pts);
+
+  return {
+    pts,geo,vel,
+    active:false,
+    t:0,
+    dur:36
+  };
+}
+
+function triggerEventSpray(spray,x,y,z,power=1){
+  const a=spray.geo.attributes.position.array;
+
+  for(let i=0;i<spray.vel.length;i++){
+    const ang=Math.random()*Math.PI*2;
+    const radial=(0.018+Math.random()*0.055)*power;
+    const lift=(0.055+Math.random()*0.095)*power;
+
+    a[i*3]=x+(Math.random()-0.5)*0.12*power;
+    a[i*3+1]=y+Math.random()*0.08;
+    a[i*3+2]=z+(Math.random()-0.5)*0.12*power;
+
+    spray.vel[i].x=Math.cos(ang)*radial;
+    spray.vel[i].y=lift;
+    spray.vel[i].z=Math.sin(ang)*radial;
+  }
+
+  spray.geo.attributes.position.needsUpdate=true;
+  spray.t=0;
+  spray.dur=32+Math.floor(Math.random()*12);
+  spray.active=true;
+  spray.pts.visible=true;
+  spray.pts.material.opacity=0.88;
+}
+
+function updateEventSpray(spray,enabled){
+  if(!enabled){
+    spray.active=false;
+    spray.pts.visible=false;
+    return;
+  }
+  if(!spray.active) return;
+
+  spray.t++;
+  const p=spray.t/spray.dur;
+  const a=spray.geo.attributes.position.array;
+
+  for(let i=0;i<spray.vel.length;i++){
+    const v=spray.vel[i];
+
+    a[i*3]+=v.x;
+    a[i*3+1]+=v.y;
+    a[i*3+2]+=v.z;
+
+    v.y-=0.0042;
+    v.x*=0.985;
+    v.z*=0.985;
+  }
+
+  spray.geo.attributes.position.needsUpdate=true;
+  spray.pts.material.opacity=Math.max(0,0.88*(1-p));
+
+  if(p>=1){
+    spray.active=false;
+    spray.pts.visible=false;
+  }
+}
+
+const dolphinDiveSpray=makeEventSpray(26,0xd7fbff,0.075);
+const whaleSurfaceSpray=makeEventSpray(46,0xe1fcff,0.085);
 
 function triggerSplash(pool,x,y,z,scale=1){
   let s=pool.find(v=>!v.m.visible);
@@ -3569,6 +4083,22 @@ function update(){ anim++;
       r.m.position.z=r.baseZ+Math.cos(anim*0.003+r.phase)*0.10;
     }
 
+    for(const a of lobbyAlgae){
+      const pulse=0.63+0.37*(0.5+0.5*Math.sin(anim*a.pulseSpeed+a.phase));
+      a.m.material.opacity=a.baseOpacity*pulse;
+
+      if(a.underwater){
+        a.m.position.x=a.baseX+Math.sin(anim*0.0014+a.phase)*0.22;
+        a.m.position.y=a.baseY+Math.sin(anim*0.0019+a.phase*1.3)*0.12;
+        a.m.position.z=a.baseZ+Math.cos(anim*0.0011+a.phase)*0.28;
+        a.m.rotation.z+=0.00038;
+      }else{
+        a.m.position.x=a.baseX+Math.sin(anim*0.0011+a.phase)*0.14;
+        a.m.position.z=a.baseZ+Math.cos(anim*0.0010+a.phase)*0.20;
+        a.m.rotation.z+=0.00022;
+      }
+    }
+
     // Boats and ship gently rock and drift.
     lobbyShip.position.x=302.8+Math.sin(anim*0.0019)*0.72;
     lobbyShip.position.y=0.06+Math.sin(anim*0.012)*0.045;
@@ -3702,6 +4232,46 @@ function update(){ anim++;
         );
         lobbyWhale.rotation.y=whaleEventYaw;
         lobbyWhale.rotation.z=-0.10*(1.0-e);
+
+        // Smooth spawn: nearly invisible at the deep start position, then
+        // gradually becomes solid as it approaches the spouting surface.
+        const reveal=smoothEvent01(Math.max(0,(p-0.03)/0.84));
+        setEventFade(lobbyWhale,reveal);
+
+        // Stronger surface arrival: broad concentric disturbance + spray.
+        if(!whaleSurfaceSplashTriggered && p>0.91){
+          whaleSurfaceSplashTriggered=true;
+
+          triggerSplash(
+            whaleEventSplashes,
+            whaleEventX,
+            0.095,
+            whaleEventZ,
+            2.55
+          );
+          triggerSplash(
+            whaleEventSplashes,
+            whaleEventX+0.28,
+            0.097,
+            whaleEventZ-0.18,
+            2.05
+          );
+          triggerSplash(
+            whaleEventSplashes,
+            whaleEventX-0.24,
+            0.097,
+            whaleEventZ+0.15,
+            1.70
+          );
+
+          triggerEventSpray(
+            whaleSurfaceSpray,
+            whaleEventX,
+            0.10,
+            whaleEventZ,
+            1.55
+          );
+        }
       }
       else if(whaleEventT<=whaleEventRise+whaleEventHold){
         const hp=(whaleEventT-whaleEventRise)/whaleEventHold;
@@ -3712,15 +4282,16 @@ function update(){ anim++;
         );
         lobbyWhale.rotation.y=whaleEventYaw+Math.sin(hp*Math.PI*2)*0.016;
         lobbyWhale.rotation.z=Math.sin(hp*Math.PI*2)*0.008;
+        setEventFade(lobbyWhale,1);
 
         // Give the whale time to settle and breathe before blowing.
         // The spout begins around the middle of the surface hold, then the
         // whale lingers afterward instead of immediately diving away.
-        if(!whaleSpoutTriggered && hp>0.38){
+        if(!whaleSpoutTriggered && hp>0.30){
           whaleSpoutTriggered=true;
           whaleSpoutActive=true;
           whaleSpoutT=0;
-          whaleSpout.material.opacity=0.78;
+          whaleSpout.material.opacity=0.92;
         }
       }
       else{
@@ -3735,8 +4306,14 @@ function update(){ anim++;
         lobbyWhale.rotation.y=whaleEventYaw;
         lobbyWhale.rotation.z=0.12*e;
 
+        // Reverse the spawn fade on the way down. It stays solid for the
+        // first part of the dive, then disappears gradually into the depth.
+        const vanish=1-smoothEvent01(Math.max(0,(sp-0.18)/0.78));
+        setEventFade(lobbyWhale,vanish);
+
         if(sp>=1){
           whaleEventActive=false;
+          setEventFade(lobbyWhale,0);
           lobbyWhale.visible=false;
           whaleSpout.visible=false;
           whaleSpoutActive=false;
@@ -3755,15 +4332,15 @@ function update(){ anim++;
         for(let i=0;i<WHALE_SPOUT_N;i++){
           const m=whaleSpoutMeta[i];
           const q=Math.max(0,Math.min(1,(p-m.lag)/(1.0-m.lag)));
-          const rise=Math.sin(q*Math.PI)*1.62*m.speed;
-          const spread=Math.sin(q*Math.PI)*m.spread;
+          const rise=Math.sin(q*Math.PI)*2.10*m.speed;
+          const spread=Math.sin(q*Math.PI)*m.spread*1.18;
 
           wp[i*3]=blowhole.x+Math.cos(m.ang)*spread;
           wp[i*3+1]=Math.max(0.055,blowhole.y)+rise;
           wp[i*3+2]=blowhole.z+Math.sin(m.ang)*spread*0.55;
         }
         whaleSpoutGeo.attributes.position.needsUpdate=true;
-        whaleSpout.material.opacity=0.78*(1.0-p);
+        whaleSpout.material.opacity=0.92*(1.0-p);
 
         if(whaleSpoutT>=WHALE_SPOUT_FRAMES){
           whaleSpoutActive=false;
@@ -3773,6 +4350,7 @@ function update(){ anim++;
 
       if(whaleEventT>=total){
         whaleEventActive=false;
+        setEventFade(lobbyWhale,0);
         lobbyWhale.visible=false;
         whaleSpout.visible=false;
         whaleSpoutActive=false;
@@ -3803,6 +4381,47 @@ function update(){ anim++;
 
         d.rotation.y=lobbyDolphinYaw;
         d.rotation.z=-0.48+0.96*q;
+
+        // Fade in early in the breach, reaching full visibility well before
+        // the dolphin reaches its highest point.
+        const reveal=smoothEvent01(Math.max(0,(q-0.02)/0.42));
+        setEventFade(d,reveal);
+
+        // Detect the real water-entry moment during the descending half
+        // of the breach arc instead of triggering at a fixed animation frame.
+        if(d.position.y>0.055){
+          lobbyDolphinWasAboveWater=true;
+        }
+        else if(
+          lobbyDolphinWasAboveWater &&
+          !lobbyDolphinDiveSplashTriggered &&
+          q>0.50
+        ){
+          lobbyDolphinDiveSplashTriggered=true;
+
+          triggerSplash(
+            dolphinEventSplashes,
+            d.position.x,
+            0.098,
+            d.position.z,
+            1.65
+          );
+          triggerSplash(
+            dolphinEventSplashes,
+            d.position.x+Math.cos(lobbyDolphinYaw)*0.10,
+            0.100,
+            d.position.z+Math.sin(lobbyDolphinYaw)*0.10,
+            1.15
+          );
+
+          triggerEventSpray(
+            dolphinDiveSpray,
+            d.position.x,
+            0.10,
+            d.position.z,
+            1.05
+          );
+        }
       }else{
         // After the dive point, go almost straight down to the seabed.
         const q=(p-0.58)/0.42;
@@ -3816,10 +4435,16 @@ function update(){ anim++;
 
         d.rotation.y=lobbyDolphinYaw;
         d.rotation.z=0.48+0.85*q;
+
+        // Stay solid at the beginning of the dive, then softly vanish deeper
+        // underwater rather than popping off at the final frame.
+        const vanish=1-smoothEvent01(Math.max(0,(q-0.28)/0.68));
+        setEventFade(d,vanish);
       }
 
       if(p>=1){
         lobbyDolphinActive=false;
+        setEventFade(d,0);
         d.visible=false;
         lobbyDolphinCooldown=2200+Math.random()*3600;
       }
@@ -4017,6 +4642,11 @@ function update(){ anim++;
 
     for(const g of lobbyGlints){
       g.m.material.opacity=g.base*(0.35+0.65*(0.5+0.5*Math.sin(anim*0.026+g.phase)));
+    }
+
+    for(const s of lobbyMoonShafts){
+      s.m.material.opacity=
+        s.baseOpacity*(0.82+0.18*(0.5+0.5*Math.sin(anim*0.008+s.phase)));
     }
 
     // Side display-tank life.
@@ -4222,6 +4852,13 @@ function update(){ anim++;
   updateSplashPool(fieldWaterSplashes,fieldRainOn);
   updateSplashPool(lobbyWaterSplashes,lobbyRainOn);
 
+  // Animal-event water impacts remain active whenever the lobby is active,
+  // regardless of whether a particular rain drop triggered them.
+  updateSplashPool(dolphinEventSplashes,lobbyRainOn);
+  updateSplashPool(whaleEventSplashes,lobbyRainOn);
+  updateEventSpray(dolphinDiveSpray,lobbyRainOn);
+  updateEventSpray(whaleSurfaceSpray,lobbyRainOn);
+
   // A few droplets creep down the panoramic glass while rain falls outside.
   for(const d of lobbyGlassDrops){
     d.m.visible=lobbyRainOn;
@@ -4232,6 +4869,23 @@ function update(){ anim++;
     if(d.m.position.y<0.55){
       d.m.position.y=d.resetY;
       d.m.position.x=292.8+Math.random()*14.4;
+    }
+  }
+
+  // Bioluminescent algae pulse and drift gently with the sea.
+  for(const a of fieldAlgae){
+    const pulse=0.66+0.34*(0.5+0.5*Math.sin(anim*a.pulseSpeed+a.phase));
+    a.m.material.opacity=a.baseOpacity*pulse;
+
+    if(a.underwater){
+      a.m.position.x=a.baseX+Math.sin(anim*0.0012+a.phase)*0.20;
+      a.m.position.y=a.baseY+Math.sin(anim*0.0017+a.phase*1.4)*0.10;
+      a.m.position.z=a.baseZ+Math.cos(anim*0.0010+a.phase)*0.26;
+      a.m.rotation.z+=0.00040;
+    }else{
+      a.m.position.x=a.baseX+Math.sin(anim*0.0010+a.phase)*0.13;
+      a.m.position.z=a.baseZ+Math.cos(anim*0.0009+a.phase)*0.18;
+      a.m.rotation.z+=0.00024;
     }
   }
 
@@ -4335,12 +4989,18 @@ function update(){ anim++;
   // The lobby is still on the surface, so it shares the exact exterior sky.
   const lobbyEnv=(zone==='interior');
   const surfaceEnv=(zone==='field' || lobbyEnv);
+
+  // Exterior and lobby share the exact same original celestial skybox.
+  // Only the below-horizon Milky Way geometry was trimmed above.
   sky.visible=surfaceEnv;
   stars.visible=surfaceEnv;
   brightStars.visible=surfaceEnv;
   constGroup.visible=surfaceEnv;
-  moonSpr.visible=surfaceEnv;
   milkyGroup.visible=surfaceEnv;
+  moonSpr.visible=surfaceEnv;
+
+  // Temporary fallback star layer is no longer used.
+  lobbySkyStars.visible=false;
 
   for(const l of lobbyWaterLights) l.visible=lobbyEnv;
   for(const l of lobbyCeilingLights) l.visible=lobbyEnv;
@@ -4361,6 +5021,8 @@ function update(){ anim++;
   lobbyWater.visible=lobbyEnv;
   lobbyFoam.visible=lobbyEnv;
   const fieldPlay=(zone==='field' && state==='play');
+  for(const a of fieldAlgae) a.m.visible=(zone==='field');
+  for(const a of lobbyAlgae) a.m.visible=lobbyEnv;
   for(const j of fieldJellies) j.g.visible=(zone==='field');
   fieldEntryPad.visible=fieldPlay;
   fieldRailPad.visible=fieldPlay;
@@ -4398,6 +5060,7 @@ function update(){ anim++;
     for(const d of lobbyDolphins) d.visible=false;
   }
   for(const g of lobbyGlints) g.m.visible=lobbyEnv;
+  for(const s of lobbyMoonShafts) s.m.visible=lobbyEnv;
 
   if(fieldPlay){
     fieldEntryPad.material.opacity=0.34+0.22*(0.5+0.5*Math.sin(anim*0.042+0.2));
