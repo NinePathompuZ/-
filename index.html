@@ -7856,6 +7856,16 @@ blockers.push({
 const DOME_KEEP_OUT = HUB_RADIUS + 2.25;
 const DOME_OUTER_LIMIT = DOME_KEEP_OUT + 62.0;
 const FISH_FORWARD_AXIS = new THREE.Vector3(1,0,0);
+// Shared scratch vectors for school simulation. Reusing these avoids hundreds
+// of short-lived Vector3 allocations every frame and reduces GC spikes.
+const _schoolTmpDesired=new THREE.Vector3();
+const _schoolTmpProbe=new THREE.Vector3();
+const _schoolTmpAvoid=new THREE.Vector3();
+const _schoolForward=new THREE.Vector3();
+const _schoolSide=new THREE.Vector3();
+const _schoolLocalUp=new THREE.Vector3();
+const _schoolPoint=new THREE.Vector3();
+const _schoolWorldUp=new THREE.Vector3(0,1,0);
 
 function clamp3(v,a,b){ return Math.max(a,Math.min(b,v)); }
 
@@ -8150,13 +8160,13 @@ function seaCreatureInsideUnderseaStructure3D(pos,margin=0){
   return !!seaCreatureCollisionInfo3D(pos,margin);
 }
 
+const _segmentStructureProbe=new THREE.Vector3();
 function segmentHitsUnderseaStructure3D(a,b,margin=1.0){
   const dist=a.distanceTo(b);
   const steps=Math.max(5,Math.min(80,Math.ceil(dist/0.38)));
-  const p=new THREE.Vector3();
   for(let i=1;i<=steps;i++){
-    p.lerpVectors(a,b,i/steps);
-    if(seaCreatureInsideUnderseaStructure3D(p,margin)) return true;
+    _segmentStructureProbe.lerpVectors(a,b,i/steps);
+    if(seaCreatureInsideUnderseaStructure3D(_segmentStructureProbe,margin)) return true;
   }
   return false;
 }
@@ -8941,64 +8951,125 @@ const leviathanAgent={
 }
 domeCreatures.push(leviathanAgent);
 
-// Sample the animated Leviathan itself, not only its group origin. This catches
-// the head/body/tail/tentacle envelope when a curled section approaches glass.
+// Sample the animated Leviathan itself, but correct collisions LOCALLY.
+// Each body/tail/tentacle joint receives its own smoothed local offset instead
+// of moving the entire Leviathan group. This prevents the old whole-model
+// snapping/stuttering when only one curled segment touches a structure.
 const _levStructureSample=new THREE.Vector3();
-function correctLeviathanAgainstStructures(c){
-  c.g.updateMatrixWorld(true);
-  const samples=[];
-  if(c.g.userData.headRoot) samples.push(c.g.userData.headRoot);
-  const body=c.g.userData.bodyChain||[];
-  for(let i=0;i<body.length;i+=2) samples.push(body[i]);
-  const tail=c.g.userData.tailChain||[];
-  for(let i=0;i<tail.length;i+=3) samples.push(tail[i]);
-  for(const horn of (c.g.userData.hornChains||[])){
-    const chain=horn.chain||[];
-    if(chain.length){
-      samples.push(chain[0]);
-      samples.push(chain[Math.floor(chain.length*0.55)]);
-      samples.push(chain[chain.length-1]);
-    }
+const _levEvadeWorld=new THREE.Vector3();
+const _levEvadeLocal=new THREE.Vector3();
+const _levEvadeScale=new THREE.Vector3();
+const _levEvadeQuat=new THREE.Quaternion();
+
+function ensureLeviathanEvadeState(obj){
+  if(!obj.userData._levEvadeBase){
+    obj.userData._levEvadeBase=obj.position.clone();
+    obj.userData._levEvadeOffset=new THREE.Vector3();
+    obj.userData._levEvadeTarget=new THREE.Vector3();
   }
+  return obj.userData;
+}
 
-  let rise=0;
-  const horizontalPush=new THREE.Vector3();
-  let horizontalHits=0;
+function leviathanLocalTargetFromCollision(obj,info,maxLocal=0.30){
+  const ud=ensureLeviathanEvadeState(obj);
+  const p=_levStructureSample;
+  _levEvadeWorld.set(0,0,0);
 
-  for(const obj of samples){
-    obj.getWorldPosition(_levStructureSample);
-    const info=seaCreatureCollisionInfo3D(_levStructureSample,1.35);
-    if(!info) continue;
+  if(info.type==='dome'){
+    let dx=p.x-info.cx;
+    let dz=p.z-info.cz;
+    let hd=Math.hypot(dx,dz);
+    if(hd<0.0001){ dx=1; dz=0; hd=1; }
 
-    const upNeed=Math.max(0,info.escapeUpY-_levStructureSample.y+0.55);
-    if(info.escapeUpY<c.yMax+5.0 && upNeed<7.0){
-      rise=Math.max(rise,upNeed);
+    const radialNeed=Math.max(0,info.radius-hd)+0.18;
+    const upNeed=Math.max(0,info.escapeUpY-p.y)+0.12;
+    const canRise=info.escapeUpY<=27.5;
+
+    if(canRise && upNeed<radialNeed*1.10){
+      _levEvadeWorld.set(0,Math.min(1.25,upNeed),0);
     }else{
-      const cx=info.cx ?? HUB_X;
-      const cz=info.cz ?? HUB_Z;
-      const away=new THREE.Vector3(_levStructureSample.x-cx,0,_levStructureSample.z-cz);
-      if(away.lengthSq()>0.00001){
-        away.normalize();
-        horizontalPush.add(away);
-        horizontalHits++;
-      }
+      const amount=Math.min(1.30,radialNeed);
+      _levEvadeWorld.set(dx/hd*amount,0,dz/hd*amount);
+    }
+  }else{
+    const sideChoices=[
+      {d:Math.abs(p.x-info.x0),x:-1,z:0},
+      {d:Math.abs(info.x1-p.x),x:1,z:0},
+      {d:Math.abs(p.z-info.z0),x:0,z:-1},
+      {d:Math.abs(info.z1-p.z),x:0,z:1}
+    ];
+    sideChoices.sort((a,b)=>a.d-b.d);
+    const side=sideChoices[0];
+    const upNeed=Math.max(0,info.escapeUpY-p.y)+0.10;
+    if(info.escapeUpY<=27.5 && upNeed<side.d*1.15){
+      _levEvadeWorld.set(0,Math.min(1.10,upNeed),0);
+    }else{
+      const amount=Math.min(1.05,side.d+0.18);
+      _levEvadeWorld.set(side.x*amount,0,side.z*amount);
     }
   }
 
-  if(rise>0){
-    c.pos.y=Math.min(c.yMax,c.pos.y+Math.min(5.5,rise));
-    c.vel.y=Math.max(c.vel.y,0.0035);
+  if(obj.parent){
+    obj.parent.getWorldQuaternion(_levEvadeQuat).invert();
+    obj.parent.getWorldScale(_levEvadeScale);
+    _levEvadeLocal.copy(_levEvadeWorld).applyQuaternion(_levEvadeQuat);
+    _levEvadeLocal.x/=Math.max(0.001,_levEvadeScale.x);
+    _levEvadeLocal.y/=Math.max(0.001,_levEvadeScale.y);
+    _levEvadeLocal.z/=Math.max(0.001,_levEvadeScale.z);
+  }else{
+    _levEvadeLocal.copy(_levEvadeWorld);
   }
 
-  if(horizontalHits>0 && horizontalPush.lengthSq()>0.00001){
-    horizontalPush.normalize().multiplyScalar(Math.min(3.8,0.55+horizontalHits*0.45));
-    c.pos.x+=horizontalPush.x;
-    c.pos.z+=horizontalPush.z;
+  if(_levEvadeLocal.length()>maxLocal){
+    _levEvadeLocal.setLength(maxLocal);
+  }
+  ud._levEvadeTarget.copy(_levEvadeLocal);
+}
+
+function updateLeviathanLocalEvasion(c){
+  const head=c.g.userData.headRoot;
+  const body=c.g.userData.bodyChain||[];
+  const tail=c.g.userData.tailChain||[];
+  const horns=c.g.userData.hornChains||[];
+
+  // Clear targets every frame. Offsets then spring back to their authored pose.
+  if(head) ensureLeviathanEvadeState(head)._levEvadeTarget.set(0,0,0);
+  for(const j of body) ensureLeviathanEvadeState(j)._levEvadeTarget.set(0,0,0);
+  for(const j of tail) ensureLeviathanEvadeState(j)._levEvadeTarget.set(0,0,0);
+  for(const horn of horns){
+    for(const j of (horn.chain||[])) ensureLeviathanEvadeState(j)._levEvadeTarget.set(0,0,0);
   }
 
-  if(rise>0 || horizontalHits>0){
-    c.g.position.copy(c.pos);
-    c.g.updateMatrixWorld(true);
+  c.g.updateMatrixWorld(true);
+
+  function sample(obj,margin,maxLocal){
+    obj.getWorldPosition(_levStructureSample);
+    const info=seaCreatureCollisionInfo3D(_levStructureSample,margin);
+    if(info) leviathanLocalTargetFromCollision(obj,info,maxLocal);
+  }
+
+  // Every segment is checked individually. Collision on the tail now bends the
+  // tail; collision on one crown tentacle bends that tentacle only, etc.
+  if(head) sample(head,1.35,0.22);
+  for(const j of body) sample(j,1.18,0.26);
+  for(const j of tail) sample(j,0.98,0.24);
+  for(const horn of horns){
+    for(const j of (horn.chain||[])) sample(j,0.72,0.20);
+  }
+
+  function apply(obj){
+    const ud=ensureLeviathanEvadeState(obj);
+    const targetActive=ud._levEvadeTarget.lengthSq()>0.000001;
+    ud._levEvadeOffset.lerp(ud._levEvadeTarget,targetActive?0.14:0.075);
+    if(ud._levEvadeOffset.lengthSq()<0.0000005) ud._levEvadeOffset.set(0,0,0);
+    obj.position.copy(ud._levEvadeBase).add(ud._levEvadeOffset);
+  }
+
+  if(head) apply(head);
+  for(const j of body) apply(j);
+  for(const j of tail) apply(j);
+  for(const horn of horns){
+    for(const j of (horn.chain||[])) apply(j);
   }
 }
 
@@ -10929,6 +11000,7 @@ function tryInteract(){
     }
 
     curThing=best; state='dialogue'; dlg={ pages:best.pages, page:0, chars:0, done:false, surprise:!!best.isSurprise }; } }
+let _lastStaticVisibilityKey='';
 function update(){ anim++;
   if(escPressed && (state==='dialogue'||state==='reveal'||state==='choice')){
     state='play'; dlg=null; hideChoices(); curThing=null; curChoices=null; activeViewpoint=null;
@@ -11021,33 +11093,35 @@ function update(){ anim++;
 
   aPressed=false; escPressed=false;
 
-  // elevator exterior motion: fish/bubbles slide upward as the cabin descends
-  const elevFlow=(state==='elevator' ? (elevatorMode==='down'?1:-1) : 0);
-  for(const f of elevatorFish){
-    f.by += elevFlow*f.spd*2.2;
-    if(f.by>8.0) f.by=-1.5;
-    if(f.by<-1.5) f.by=8.0;
-    const sway=Math.sin(anim*0.014+f.ph)*0.55;
-    const ex=ELEV_X+f.bx+sway;
-    const ey=f.by;
-    const ez=ELEV_Z+f.bz+Math.cos(anim*0.009+f.ph)*0.35;
-    f.spr.position.set(ex,ey,ez);
-    orientFishPlane(f,ex,ey,ez,f.dir,0);
-  }
-  {
+  // Zone-scoped simulation: inactive levels are frozen instead of continuously
+  // animating off-screen. This preserves the exact look when a level is active.
+  if(state==='elevator'){
+    const elevFlow=(elevatorMode==='down'?1:-1);
+    for(const f of elevatorFish){
+      f.by += elevFlow*f.spd*2.2;
+      if(f.by>8.0) f.by=-1.5;
+      if(f.by<-1.5) f.by=8.0;
+      const sway=Math.sin(anim*0.014+f.ph)*0.55;
+      const ex=ELEV_X+f.bx+sway;
+      const ey=f.by;
+      const ez=ELEV_Z+f.bz+Math.cos(anim*0.009+f.ph)*0.35;
+      f.spr.position.set(ex,ey,ez);
+      orientFishPlane(f,ex,ey,ez,f.dir,0);
+    }
     const ep=elevBubGeo.attributes.position.array;
     for(let i=0;i<ELEV_BUB;i++){
-      ep[i*3+1]+=0.015+(state==='elevator'?0.038:0.006);
+      ep[i*3+1]+=0.053;
       if(ep[i*3+1]>9.0) ep[i*3+1]=-1.5;
       ep[i*3]+=Math.sin(anim*0.010+elevBubBase[i].ph)*0.0025;
     }
     elevBubGeo.attributes.position.needsUpdate=true;
+    for(let i=0;i<liftStreaks.length;i++){
+      liftStreaks[i].material.opacity=0.025+0.025*(0.5+0.5*Math.sin(anim*0.010+i));
+      liftStreaks[i].position.y=2.6+Math.sin(anim*0.006+i)*0.8;
+    }
   }
-  for(let i=0;i<liftStreaks.length;i++){
-    liftStreaks[i].material.opacity=0.025+0.025*(0.5+0.5*Math.sin(anim*0.010+i));
-    liftStreaks[i].position.y=2.6+Math.sin(anim*0.006+i)*0.8;
-  }
-  {
+
+  if(zone==='underwater'){
     const ap=atriumTubeBubGeo.attributes.position.array;
     for(let i=0;i<ATRIUM_TUBE_BUB;i++){
       const base=atriumTubeBubMeta[i];
@@ -11057,8 +11131,7 @@ function update(){ anim++;
       ap[i*3+2]=HUB_Z+Math.sin(base.a+anim*0.0010+base.ph)*base.rr;
     }
     atriumTubeBubGeo.attributes.position.needsUpdate=true;
-  }
-  {
+
     const bp=underFloorBubGeo.attributes.position.array;
     for(let i=0;i<UNDERFLOOR_BUB;i++){
       const base=underFloorBubMeta[i];
@@ -11088,7 +11161,7 @@ function update(){ anim++;
       sc.speedMul+=(sc.targetSpeedMul-sc.speedMul)*0.014;
       sc.tightness+=(sc.targetTightness-sc.tightness)*0.014;
 
-      const desired=sc.target.clone().sub(sc.pos);
+      const desired=_schoolTmpDesired.copy(sc.target).sub(sc.pos);
       if(desired.lengthSq()>0.0001){
         desired.normalize().multiplyScalar(sc.baseSpeed*sc.speedMul);
         sc.vel.lerp(desired,sc.behavior==='dart'?0.026:0.016);
@@ -11099,7 +11172,7 @@ function update(){ anim++;
 
       // Predictive structure avoidance: if the next few frames would enter the
       // dome or any mission/surprise wing, retarget before penetration.
-      const probe=sc.pos.clone().addScaledVector(sc.vel,42);
+      const probe=_schoolTmpProbe.copy(sc.pos).addScaledVector(sc.vel,42);
       if(segmentHitsUnderseaStructure3D(sc.pos,probe,1.55)){
         // Turn before the school reaches the wall. Do not immediately reverse
         // every time; alternating direction caused some schools to oscillate
@@ -11108,7 +11181,7 @@ function update(){ anim++;
         retargetDomeSchool(sc);
 
         // Begin steering toward the fresh target right now.
-        const avoidDir=sc.target.clone().sub(sc.pos);
+        const avoidDir=_schoolTmpAvoid.copy(sc.target).sub(sc.pos);
         if(avoidDir.lengthSq()>0.0001){
           avoidDir.normalize().multiplyScalar(sc.baseSpeed*0.92);
           sc.vel.lerp(avoidDir,0.22);
@@ -11128,7 +11201,7 @@ function update(){ anim++;
         if(Math.random()<0.18) sc.dir*=-1;
         retargetDomeSchool(sc);
 
-        const escape=sc.target.clone().sub(sc.pos);
+        const escape=_schoolTmpAvoid.copy(sc.target).sub(sc.pos);
         if(escape.lengthSq()>0.0001){
           escape.normalize().multiplyScalar(sc.baseSpeed);
           sc.vel.lerp(escape,0.20);
@@ -11137,17 +11210,16 @@ function update(){ anim++;
       sc.pos.y=clamp3(sc.pos.y,0.72,16.2);
     }
 
-    const worldUp=new THREE.Vector3(0,1,0);
     for(const f of domeSchoolFish){
       const sc=f.school;
-      const forward=sc.vel.clone();
+      const forward=_schoolForward.copy(sc.vel);
       if(forward.lengthSq()<0.000001) forward.set(sc.dir,0,0);
       forward.normalize();
 
-      let side=new THREE.Vector3().crossVectors(worldUp,forward);
+      const side=_schoolSide.crossVectors(_schoolWorldUp,forward);
       if(side.lengthSq()<0.000001) side.set(1,0,0);
       side.normalize();
-      const localUp=new THREE.Vector3().crossVectors(forward,side).normalize();
+      const localUp=_schoolLocalUp.crossVectors(forward,side).normalize();
 
       const breathe=1.0+0.075*Math.sin(anim*0.0055+f.phase+sc.phase);
       const form=sc.tightness*breathe;
@@ -11155,7 +11227,7 @@ function update(){ anim++;
       const microSide=Math.sin(anim*0.009+f.phase*1.7)*0.043;
       const microUp=Math.cos(anim*0.010+f.phase*1.3)*0.052;
 
-      const p=sc.pos.clone()
+      const p=_schoolPoint.copy(sc.pos)
         .addScaledVector(forward,f.forward*form+microForward)
         .addScaledVector(side,f.sideways*form+microSide)
         .addScaledVector(localUp,f.vertical*form+microUp);
@@ -11381,9 +11453,12 @@ function update(){ anim++;
         const roomDx=px-SURPRISE_ROOM_X;
         const roomDz=pz-SURPRISE_ROOM_Z;
         const roomDist=Math.hypot(roomDx,roomDz);
-        const leviathanBodyClearance=SURPRISE_ROOM_RADIUS+10.5;
+        const leviathanBodyClearance=SURPRISE_ROOM_RADIUS+11.5;
         if(roomDist<leviathanBodyClearance){
-          rr+=Math.min(14.0,(leviathanBodyClearance-roomDist)*1.15+2.0);
+          // Smooth broad-course bias only. Fine collision correction is handled
+          // per segment below, so the whole creature never snaps on contact.
+          const q=1-roomDist/leviathanBodyClearance;
+          rr+=Math.min(10.0,q*q*10.0);
           px=HUB_X+Math.cos(c.angle)*rr;
           pz=HUB_Z+Math.sin(c.angle)*rr;
         }
@@ -11392,11 +11467,6 @@ function update(){ anim++;
           c.baseY+
           Math.sin(anim*0.00043+c.phase)*c.yAmp+
           Math.cos(anim*0.00016+c.phase)*0.65;
-
-        // Vertical evasion uses a large clearance radius to represent the
-        // Leviathan's actual body volume, not just its group origin.
-        const clearanceY=seaCreatureClearanceYAt(px,pz,9.0);
-        if(clearanceY!==null) py=Math.max(py,clearanceY+1.35);
         py=clamp3(py,c.yMin,c.yMax);
 
         c.pos.set(px,py,pz);
@@ -11525,7 +11595,7 @@ function update(){ anim++;
             0.56+0.12*(0.5+0.5*Math.sin(anim*0.005+c.phase));
         }
 
-        correctLeviathanAgainstStructures(c);
+        updateLeviathanLocalEvasion(c);
         continue;
       }
 
@@ -11702,20 +11772,21 @@ function update(){ anim++;
 
   }
 
-  // ambient: fish swim + bounce, motes drift up
-  for(const f of fishes){
-    f.x += f.dir*f.spd;
-    if(f.x < POOL.x0+0.4) f.dir=1; if(f.x > POOL.x1-0.4) f.dir=-1;
-    const fz=(POOL.z0+POOL.z1)/2 + Math.sin((anim+f.ph)/95)*3.5;
-    const fy=0.16 + Math.sin((anim+f.ph)/44)*0.05;
-    f.spr.position.set(f.x,fy,fz);
-    orientFishPlane(f,f.x,fy,fz,f.dir,0);
-  }
-  // subtle surface-detail drift from the uploaded water ripple sprites
-  for(const r of seaRipples){
-    r.m.material.opacity=r.op*(0.78+0.22*Math.sin(anim*0.010+r.phase));
-    r.m.position.x=r.baseX+Math.sin(anim*0.0035+r.phase)*0.18;
-    r.m.position.z=r.baseZ+Math.cos(anim*0.0028+r.phase)*0.10;
+  // Exterior-only ambience is fully paused outside the field level.
+  if(zone==='field'){
+    for(const f of fishes){
+      f.x += f.dir*f.spd;
+      if(f.x < POOL.x0+0.4) f.dir=1; if(f.x > POOL.x1-0.4) f.dir=-1;
+      const fz=(POOL.z0+POOL.z1)/2 + Math.sin((anim+f.ph)/95)*3.5;
+      const fy=0.16 + Math.sin((anim+f.ph)/44)*0.05;
+      f.spr.position.set(f.x,fy,fz);
+      orientFishPlane(f,f.x,fy,fz,f.dir,0);
+    }
+    for(const r of seaRipples){
+      r.m.material.opacity=r.op*(0.78+0.22*Math.sin(anim*0.010+r.phase));
+      r.m.position.x=r.baseX+Math.sin(anim*0.0035+r.phase)*0.18;
+      r.m.position.z=r.baseZ+Math.cos(anim*0.0028+r.phase)*0.10;
+    }
   }
 
   // Lobby panoramic-window sea life.
@@ -12755,85 +12826,93 @@ function update(){ anim++;
   const lobbyEnv=(zone==='interior');
   const underwaterEnv=(zone==='underwater');
   const surfaceEnv=(zone==='field' || lobbyEnv);
-
-  // Exterior and lobby share the exact same original celestial skybox.
-  // Only the below-horizon Milky Way geometry was trimmed above.
-  sky.visible=surfaceEnv;
-  stars.visible=surfaceEnv;
-  brightStars.visible=surfaceEnv;
-  constGroup.visible=surfaceEnv;
-  milkyGroup.visible=surfaceEnv;
-  moonSpr.visible=surfaceEnv;
-
-  // Temporary fallback star layer is no longer used.
-  lobbySkyStars.visible=false;
-
-  // STAR-DOME VISIBILITY GATE
-  // These objects live around x≈600 but were previously always visible.
-  // From the lobby (x≈300) they formed the mysterious distant blue/black
-  // particle hemisphere seen through the panoramic window.
-  domeStars.visible=underwaterEnv;
-  brightBio.visible=underwaterEnv;
-  outerStarField.visible=underwaterEnv;
-  outerBlueGlowField.visible=underwaterEnv;
-  uwBubbles.visible=underwaterEnv;
-  underFloorBubbles.visible=underwaterEnv;
-  atriumTubeBubbles.visible=underwaterEnv;
-  surpriseRoomGroup.visible=underwaterEnv;
-
-  underseaFloorGroup.visible=underwaterEnv;
-  droneConsoleGroup.visible=underwaterEnv;
-  droneDockGroup.visible=underwaterEnv;
-  droneConsolePad.visible=underwaterEnv && state==='play';
-  explorationDrone.visible=underwaterEnv;
-  droneBubbleGroup.visible=underwaterEnv;
-  for(const g of domeGlowPatches) g.patch.visible=underwaterEnv;
-  for(const reef of domeCoralReefs) reef.g.visible=underwaterEnv;
-  for(const f of domeSchoolFish) f.spr.visible=underwaterEnv;
-  for(const f of domeSmall3DFish) f.g.visible=underwaterEnv;
-  for(const f of domeTropicalFish) f.g.visible=underwaterEnv;
-  for(const r of domeRays) r.g.visible=underwaterEnv;
-  for(const s of domeSeahorses) s.spr.visible=underwaterEnv;
-  for(const c of domeCreatures) c.g.visible=underwaterEnv;
-
-  for(const l of lobbyWaterLights) l.visible=lobbyEnv;
-  for(const l of lobbyCeilingLights) l.visible=lobbyEnv;
-
-  // Ceiling/front exit wall are only rendered in first person so they do not
-  // block the normal dollhouse camera.
-  lobbyFpsShell.visible=lobbyEnv && state==='fpcam';
-  underLobbyLift.visible=lobbyEnv;
-  underLobbyDepthLight.visible=lobbyEnv;
-
-  if(!surfaceEnv){
-    fieldRain.lines.visible=false;
-    lobbyRain.lines.visible=false;
-    for(const d of lobbyGlassDrops) d.m.visible=false;
-  }
-
-  // No lobby seabed plane: keep the water column visually open.
-  lobbyWater.visible=lobbyEnv;
-  lobbyFoam.visible=lobbyEnv;
   const fieldPlay=(zone==='field' && state==='play');
-  for(const a of fieldAlgae) a.m.visible=(zone==='field');
-  for(const a of lobbyAlgae) a.m.visible=lobbyEnv;
-  for(const j of fieldJellies) j.g.visible=(zone==='field');
-  fieldEntryPad.visible=fieldPlay;
-  fieldRailPad.visible=fieldPlay;
-  lobbyExitPad.visible=lobbyEnv && state==='play';
-  lobbyElevatorPad.visible=lobbyEnv && state==='play'; // circular elevator interaction marker
-  lobbyViewPad.visible=lobbyEnv && state==='play';
-  lobbyRightViewPad.visible=lobbyEnv && state==='play';
-  for(const f of sideTankFish) f.spr.visible=lobbyEnv;
-  for(const d of sideTankDecor) d.visible=lobbyEnv;
-  for(const b of sideTankBubbles) b.spr.visible=lobbyEnv;
-  for(const p of sideTankPads) p.pad.visible=lobbyEnv && state==='play';
-  airlockPad.visible=(zone==='underwater' && state==='play');
 
-  for(const r of lobbySeaRipples) r.m.visible=lobbyEnv;
-  for(const o of lobbyVistaObjects) o.visible=lobbyEnv;
-  for(const f of lobbyLargeFish) f.g.visible=lobbyEnv;
-  for(const j of lobbyJellies) j.g.visible=lobbyEnv;
+  // Static visibility only changes when the active zone/state changes.
+  // This avoids walking every fish/reef/decor array on every rendered frame.
+  const staticVisibilityKey=zone+'|'+state;
+  if(staticVisibilityKey!==_lastStaticVisibilityKey){
+    _lastStaticVisibilityKey=staticVisibilityKey;
+    // Exterior and lobby share the exact same original celestial skybox.
+    // Only the below-horizon Milky Way geometry was trimmed above.
+    sky.visible=surfaceEnv;
+    stars.visible=surfaceEnv;
+    brightStars.visible=surfaceEnv;
+    constGroup.visible=surfaceEnv;
+    milkyGroup.visible=surfaceEnv;
+    moonSpr.visible=surfaceEnv;
+
+    // Temporary fallback star layer is no longer used.
+    lobbySkyStars.visible=false;
+
+    // STAR-DOME VISIBILITY GATE
+    // These objects live around x≈600 but were previously always visible.
+    // From the lobby (x≈300) they formed the mysterious distant blue/black
+    // particle hemisphere seen through the panoramic window.
+    domeStars.visible=underwaterEnv;
+    brightBio.visible=underwaterEnv;
+    outerStarField.visible=underwaterEnv;
+    outerBlueGlowField.visible=underwaterEnv;
+    uwBubbles.visible=underwaterEnv;
+    underFloorBubbles.visible=underwaterEnv;
+    atriumTubeBubbles.visible=underwaterEnv;
+    surpriseRoomGroup.visible=underwaterEnv;
+    if(typeof underwaterFogGroup!=='undefined') underwaterFogGroup.visible=underwaterEnv;
+
+    underseaFloorGroup.visible=underwaterEnv;
+    droneConsoleGroup.visible=underwaterEnv;
+    droneDockGroup.visible=underwaterEnv;
+    droneConsolePad.visible=underwaterEnv && state==='play';
+    explorationDrone.visible=underwaterEnv;
+    droneBubbleGroup.visible=underwaterEnv;
+    for(const g of domeGlowPatches) g.patch.visible=underwaterEnv;
+    for(const reef of domeCoralReefs) reef.g.visible=underwaterEnv;
+    for(const f of domeSchoolFish) f.spr.visible=underwaterEnv;
+    for(const f of domeSmall3DFish) f.g.visible=underwaterEnv;
+    for(const f of domeTropicalFish) f.g.visible=underwaterEnv;
+    for(const r of domeRays) r.g.visible=underwaterEnv;
+    for(const s of domeSeahorses) s.spr.visible=underwaterEnv;
+    for(const c of domeCreatures) c.g.visible=underwaterEnv;
+
+    for(const l of lobbyWaterLights) l.visible=lobbyEnv;
+    for(const l of lobbyCeilingLights) l.visible=lobbyEnv;
+
+    // Ceiling/front exit wall are only rendered in first person so they do not
+    // block the normal dollhouse camera.
+    lobbyFpsShell.visible=lobbyEnv && state==='fpcam';
+    underLobbyLift.visible=lobbyEnv;
+    underLobbyDepthLight.visible=lobbyEnv;
+
+    if(!surfaceEnv){
+      fieldRain.lines.visible=false;
+      lobbyRain.lines.visible=false;
+      for(const d of lobbyGlassDrops) d.m.visible=false;
+    }
+
+    // No lobby seabed plane: keep the water column visually open.
+    lobbyWater.visible=lobbyEnv;
+    lobbyFoam.visible=lobbyEnv;
+    for(const a of fieldAlgae) a.m.visible=(zone==='field');
+    for(const a of lobbyAlgae) a.m.visible=lobbyEnv;
+    for(const j of fieldJellies) j.g.visible=(zone==='field');
+    fieldEntryPad.visible=fieldPlay;
+    fieldRailPad.visible=fieldPlay;
+    lobbyExitPad.visible=lobbyEnv && state==='play';
+    lobbyElevatorPad.visible=lobbyEnv && state==='play'; // circular elevator interaction marker
+    lobbyViewPad.visible=lobbyEnv && state==='play';
+    lobbyRightViewPad.visible=lobbyEnv && state==='play';
+    for(const f of sideTankFish) f.spr.visible=lobbyEnv;
+    for(const d of sideTankDecor) d.visible=lobbyEnv;
+    for(const b of sideTankBubbles) b.spr.visible=lobbyEnv;
+    for(const p of sideTankPads) p.pad.visible=lobbyEnv && state==='play';
+    airlockPad.visible=(zone==='underwater' && state==='play');
+
+    for(const r of lobbySeaRipples) r.m.visible=lobbyEnv;
+    for(const o of lobbyVistaObjects) o.visible=lobbyEnv;
+    for(const f of lobbyLargeFish) f.g.visible=lobbyEnv;
+    for(const j of lobbyJellies) j.g.visible=lobbyEnv;
+
+  }
 
   // Event animals manage their own visibility.
   lobbyWhale.visible=lobbyEnv && whaleEventActive;
@@ -12913,7 +12992,7 @@ function update(){ anim++;
       0.16*(0.5+0.5*Math.sin(anim*0.045+0.8));
   }
 
-  if(typeof updateSurpriseRoomFx==='function') updateSurpriseRoomFx();
+  if(underwaterEnv && typeof updateSurpriseRoomFx==='function') updateSurpriseRoomFx();
 
   const showAirlockHud=(state==='airlock') || (zone==='underwater' && airlockIntroDone);
   airlockHud.classList.toggle('show',showAirlockHud);
@@ -12944,7 +13023,15 @@ function fit(){ const W=innerWidth, H=innerHeight;
 addEventListener('resize',fit); fit();
 try{ window.focus(); }catch(e){}
 addEventListener('load', ()=>{ try{ window.focus(); }catch(e){} });
+let _pageHidden=document.hidden;
+document.addEventListener('visibilitychange',()=>{ _pageHidden=document.hidden; });
 function frame(){
+  // Browser-tab cache: inactive previews/tabs consume almost no simulation or
+  // rendering time, then resume from the same state when focused again.
+  if(_pageHidden){
+    requestAnimationFrame(frame);
+    return;
+  }
   update();
   syncAmbientAudio();
   syncTankNoteOverlay();
